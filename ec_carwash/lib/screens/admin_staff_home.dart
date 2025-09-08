@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'pos_screen.dart';
 
 class AdminStaffHome extends StatefulWidget {
   final String role; // "Admin" or "Staff"
@@ -43,24 +44,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
           Expanded(child: _buildPage(menuItems[_selectedIndex])),
         ],
       ),
-      bottomNavigationBar: isDesktop
-          ? null
-          : BottomNavigationBar(
-              currentIndex: _selectedIndex,
-              onTap: (index) => setState(() => _selectedIndex = index),
-              type: BottomNavigationBarType.fixed,
-              selectedItemColor: Colors.yellow[700],
-              unselectedItemColor: Colors.grey,
-              items: menuItems
-                  .map(
-                    (title) => BottomNavigationBarItem(
-                      icon: const Icon(Icons.circle_outlined),
-                      activeIcon: const Icon(Icons.circle),
-                      label: title,
-                    ),
-                  )
-                  .toList(),
-            ),
+      // 🚫 Removed BottomNavigationBar
     );
   }
 
@@ -90,7 +74,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
               selected: _selectedIndex == idx,
               onTap: () {
                 setState(() => _selectedIndex = idx);
-                Navigator.pop(context);
+                Navigator.pop(context); // close drawer after selection
               },
             );
           }),
@@ -128,6 +112,8 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
     switch (menu) {
       case "Dashboard":
         return _buildDashboard();
+      case "POS":
+        return const POSScreen(); // 👈 here
       default:
         return Center(
           child: Text(
