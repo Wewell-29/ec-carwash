@@ -51,19 +51,13 @@ class _LoginPageState extends State<LoginPage> {
                       CircleAvatar(
                         radius: 50,
                         backgroundColor: Colors.yellow[700],
-                        child: const Icon(
-                          Icons.local_car_wash,
-                          color: Colors.black,
-                          size: 50,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        "EC Carwash",
-                        style: GoogleFonts.poppins(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
+                        child: ClipOval(
+                          child: Image.asset(
+                            "assets/images/new_logo.png",
+                            fit: BoxFit.cover,
+                            width: 90,
+                            height: 90,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 10),
