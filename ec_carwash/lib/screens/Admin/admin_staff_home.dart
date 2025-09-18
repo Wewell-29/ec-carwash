@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'pos_screen.dart';
 
 class AdminStaffHome extends StatefulWidget {
-  final String role; // "Admin" or "Staff"
-  const AdminStaffHome({super.key, required this.role});
+  const AdminStaffHome({super.key});
 
   @override
   State<AdminStaffHome> createState() => _AdminStaffHomeState();
@@ -21,8 +20,8 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       "Inventory",
       "Expenses",
       "Services",
+      "Analytics",
     ];
-    if (widget.role == "Admin") items.add("Analytics");
     return items;
   }
 
@@ -33,7 +32,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("${widget.role} Dashboard"),
+        title: Text("Dashboard"),
         backgroundColor: Colors.black,
         foregroundColor: Colors.yellow[700],
       ),
