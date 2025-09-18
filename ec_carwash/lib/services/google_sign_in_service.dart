@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 class GoogleSignInService {
   static final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: ['email'],
+    serverClientId: '14839235089-an3b18j0b8039dnmm0at8jermsshf9e8.apps.googleusercontent.com',
   );
   static final FirebaseAuth _auth = FirebaseAuth.instance;
 
