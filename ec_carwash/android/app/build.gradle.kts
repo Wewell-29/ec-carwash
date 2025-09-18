@@ -51,5 +51,6 @@ dependencies {
     
     // Add Firebase Analytics
     implementation("com.google.firebase:firebase-analytics")
-
+    
+    // Add other Firebase products as needed
 }
