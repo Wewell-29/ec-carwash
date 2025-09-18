@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'theme.dart';
 import 'screens/login_page.dart';
 import 'screens/admin_staff_home.dart';
 import 'screens/customer_home.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   runApp(const ECCarwashApp());
 }
 
