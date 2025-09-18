@@ -27,7 +27,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
+        versionCode = flutter    
+    // Add other Firebase products as needed.versionCode
         versionName = flutter.versionName
     }
 
@@ -50,6 +51,5 @@ dependencies {
     
     // Add Firebase Analytics
     implementation("com.google.firebase:firebase-analytics")
-    
-    // Add other Firebase products as needed
+
 }
