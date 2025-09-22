@@ -3,6 +3,7 @@ import 'package:ec_carwash/data_models/products_data.dart';
 import 'cart_item.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'customer_home.dart';
 
 class BookServiceScreen extends StatefulWidget {
   const BookServiceScreen({super.key});
@@ -17,27 +18,9 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   TimeOfDay? _selectedTime;
   bool _isLoading = false;
 
-  // pick date
-  void _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2100),
-      initialDate: DateTime.now(),
-    );
-    if (picked != null) setState(() => _selectedDate = picked);
-  }
+  final TextEditingController _plateController = TextEditingController();
 
-  // pick time
-  void _pickTime() async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-    );
-    if (picked != null) setState(() => _selectedTime = picked);
-  }
-
-  // add item to cart
+  // --- CART FUNCTIONS ---
   void _addToCart(String key, String vehicleType, int price) {
     setState(() {
       _cart.add(
@@ -51,18 +34,41 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     });
   }
 
-  // remove item from cart
   void _removeFromCart(CartItem item) {
     setState(() {
       _cart.remove(item);
     });
   }
 
-  // submit booking with full-screen loading
+  // --- DATE & TIME PICKERS ---
+  void _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2100),
+      initialDate: DateTime.now(),
+    );
+    if (picked != null) setState(() => _selectedDate = picked);
+  }
+
+  void _pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+    if (picked != null) setState(() => _selectedTime = picked);
+  }
+
+  // --- SUBMIT BOOKING ---
   void _submitBooking() async {
-    if (_cart.isEmpty || _selectedDate == null || _selectedTime == null) {
+    if (_cart.isEmpty ||
+        _selectedDate == null ||
+        _selectedTime == null ||
+        _plateController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please select services, date, and time")),
+        const SnackBar(
+          content: Text("Please select services, date, time, and plate number"),
+        ),
       );
       return;
     }
@@ -79,10 +85,12 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
 
     setState(() => _isLoading = true);
 
+    final plateNumber = _plateController.text.trim();
     final bookingData = {
       "userId": user.uid,
       "userEmail": user.email,
       "userName": user.displayName ?? "",
+      "plateNumber": plateNumber,
       "services": _cart
           .map(
             (item) => {
@@ -99,16 +107,46 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     };
 
     try {
+      // Save booking
       await FirebaseFirestore.instance.collection("Bookings").add(bookingData);
+
+      // Save/update Customers collection
+      final vehicleType = _cart.isNotEmpty ? _cart.first.vehicleType : "";
+      final customerRef = FirebaseFirestore.instance.collection("Customers");
+      final existing = await customerRef
+          .where("plateNumber", isEqualTo: plateNumber)
+          .limit(1)
+          .get();
+
+      if (existing.docs.isEmpty) {
+        // New record
+        await customerRef.add({
+          "email": user.email,
+          "name": user.displayName ?? "",
+          "plateNumber": plateNumber,
+          "vehicleType": vehicleType,
+          "createdAt": FieldValue.serverTimestamp(),
+        });
+      } else {
+        // Keep existing vehicleType
+        final doc = existing.docs.first;
+        final storedVehicle = doc["vehicleType"];
+        await customerRef.doc(doc.id).update({
+          "email": user.email,
+          "name": user.displayName ?? "",
+          "plateNumber": plateNumber,
+          "vehicleType": storedVehicle,
+        });
+      }
 
       setState(() {
         _cart.clear();
         _selectedDate = null;
         _selectedTime = null;
+        _plateController.clear();
         _isLoading = false;
       });
 
-      // Close bottom sheet if open
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -122,7 +160,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     }
   }
 
-  // show cart in bottom sheet
+  // --- SHOW CART ---
   void _showCart() {
     final total = _cart.fold<int>(0, (sum, item) => sum + item.price);
 
@@ -179,9 +217,25 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    if (_selectedDate != null && _selectedTime != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        "Selected: ${_selectedDate!.toLocal().toString().split(' ')[0]} at ${_selectedTime!.format(context)}",
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ],
                     const SizedBox(height: 16),
 
-                    // Date & Time pickers
+                    // 🔹 Plate Number
+                    TextField(
+                      controller: _plateController,
+                      decoration: const InputDecoration(
+                        labelText: "Plate Number",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
                     Row(
                       children: [
                         Expanded(
@@ -208,8 +262,6 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-
-                    // Submit button
                     ElevatedButton(
                       onPressed: _submitBooking,
                       style: ElevatedButton.styleFrom(
@@ -223,8 +275,6 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                 ),
               ),
             ),
-
-            // Full-screen loading overlay
             if (_isLoading)
               Positioned.fill(
                 child: Container(
@@ -240,19 +290,226 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     );
   }
 
+  // --- MAIN UI ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      body: SelectVehicleScreen(
+        onVehicleSelected: (vehicleType) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => VehicleServicesScreen(
+                vehicleType: vehicleType,
+                onAddToCart: _addToCart,
+                cart: _cart,
+                showCart: _showCart,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// --- VEHICLE SELECTION ---
+// --- VEHICLE SELECTION ---
+class SelectVehicleScreen extends StatelessWidget {
+  final Function(String) onVehicleSelected;
+
+  const SelectVehicleScreen({super.key, required this.onVehicleSelected});
+
+  IconData _getVehicleIcon(String type) {
+    switch (type.toLowerCase()) {
+      case "car":
+        return Icons.directions_car;
+      case "suv":
+        return Icons.directions_car_filled;
+      case "van":
+        return Icons.airport_shuttle;
+      case "pick-up":
+      case "pickup":
+        return Icons.local_shipping;
+      case "delivery truck":
+      case "truck":
+        return Icons.local_shipping;
+      case "motorcycle":
+      case "motorcycle s":
+      case "motorcycle l":
+        return Icons.motorcycle;
+      case "tricycle":
+        return Icons.electric_bike;
+      default:
+        return Icons.directions_car;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final vehicleTypes = <String>{};
+    for (var entry in productsData.entries) {
+      (entry.value['prices'] as Map<String, dynamic>).keys.forEach(
+        vehicleTypes.add,
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text("Select Vehicle")),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
+              decoration: BoxDecoration(color: Colors.yellow[700]),
+              child: const Align(
+                alignment: Alignment.bottomLeft,
+                child: Text(
+                  "EC Carwash",
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+
+            // 🔹 Home
+            ListTile(
+              leading: const Icon(Icons.home),
+              title: const Text("Home"),
+              selected: false, // Not highlighted
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CustomerHome()),
+                );
+              },
+            ),
+
+            // 🔹 Book a Service (highlighted)
+            ListTile(
+              leading: const Icon(Icons.book_online),
+              title: const Text("Book a Service"),
+              selected: true, // ✅ Highlight this item
+              selectedTileColor: Colors.yellow[100], // background highlight
+              textColor: Colors.black, // keep text readable
+              iconColor: Colors.black, // keep icon readable
+              onTap: () {
+                Navigator.pop(context);
+                // already on BookServiceScreen, so no need to push again
+              },
+            ),
+
+            // 🔹 Booking History
+            ListTile(
+              leading: const Icon(Icons.history),
+              title: const Text("Booking History"),
+              selected: false,
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Navigate to history screen
+              },
+            ),
+            const Divider(),
+
+            // 🔹 Logout
+            ListTile(
+              leading: const Icon(Icons.logout),
+              title: const Text("Logout"),
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Add logout logic
+              },
+            ),
+          ],
+        ),
+      ),
+
+      body: GridView.count(
+        crossAxisCount: 2,
+        padding: const EdgeInsets.all(16),
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        children: vehicleTypes.map((type) {
+          return GestureDetector(
+            onTap: () => onVehicleSelected(type),
+            child: Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: 4,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(_getVehicleIcon(type), size: 50, color: Colors.blue),
+                  const SizedBox(height: 8),
+                  Text(
+                    type,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// --- SERVICES SCREEN ---
+class VehicleServicesScreen extends StatefulWidget {
+  final String vehicleType;
+  final Function(String, String, int) onAddToCart;
+  final List<CartItem> cart;
+  final VoidCallback showCart;
+
+  const VehicleServicesScreen({
+    super.key,
+    required this.vehicleType,
+    required this.onAddToCart,
+    required this.cart,
+    required this.showCart,
+  });
+
+  @override
+  State<VehicleServicesScreen> createState() => _VehicleServicesScreenState();
+}
+
+class _VehicleServicesScreenState extends State<VehicleServicesScreen> {
+  String _selectedFilter = "ALL";
+  final List<String> _filters = ["ALL", "EC", "Promo", "Upgrade"];
+
+  bool _matchesFilter(String serviceKey) {
+    if (_selectedFilter == "ALL") return true;
+    return serviceKey.toLowerCase().startsWith(_selectedFilter.toLowerCase());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredServices = productsData.entries.where((entry) {
+      final prices = entry.value['prices'] as Map<String, dynamic>;
+      return prices.containsKey(widget.vehicleType) &&
+          _matchesFilter(entry.key);
+    }).toList();
+
+    return Scaffold(
       appBar: AppBar(
-        title: const Text("Book a Service"),
+        title: Text("Services for ${widget.vehicleType}"),
         actions: [
           Stack(
             children: [
               IconButton(
                 icon: const Icon(Icons.shopping_cart),
-                onPressed: _showCart,
+                onPressed: widget.showCart,
               ),
-              if (_cart.isNotEmpty)
+              if (widget.cart.isNotEmpty)
                 Positioned(
                   right: 6,
                   top: 6,
@@ -260,7 +517,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                     radius: 10,
                     backgroundColor: Colors.red,
                     child: Text(
-                      "${_cart.length}",
+                      "${widget.cart.length}",
                       style: const TextStyle(fontSize: 12, color: Colors.white),
                     ),
                   ),
@@ -269,26 +526,152 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
           ),
         ],
       ),
-      body: ListView(
-        children: productsData.entries.map((entry) {
-          final key = entry.key;
-          final name = entry.value['name'];
-          final prices = entry.value['prices'] as Map<String, dynamic>;
+      body: Column(
+        children: [
+          // 🔽 FILTER BAR
+          Container(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              borderRadius: BorderRadius.circular(30),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final segmentWidth = constraints.maxWidth / _filters.length;
+                final selectedIndex = _filters.indexOf(_selectedFilter);
 
-          return ExpansionTile(
-            leading: const Icon(Icons.cleaning_services),
-            title: Text(name),
-            children: prices.entries.map((p) {
-              return ListTile(
-                title: Text("${p.key} - ₱${p.value}"),
-                trailing: ElevatedButton(
-                  onPressed: () => _addToCart(key, p.key, p.value as int),
-                  child: const Text("Add"),
-                ),
-              );
-            }).toList(),
-          );
-        }).toList(),
+                return Stack(
+                  children: [
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeInOut,
+                      left: segmentWidth * selectedIndex,
+                      child: Container(
+                        width: segmentWidth,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.yellow[700],
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: _filters.map((filter) {
+                        final isSelected = _selectedFilter == filter;
+                        return Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedFilter = filter;
+                              });
+                            },
+                            child: Container(
+                              height: 40,
+                              alignment: Alignment.center,
+                              child: Text(
+                                filter,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: isSelected
+                                      ? Colors.black
+                                      : Colors.grey[600],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+
+          // 🔽 SERVICES GRID
+          Expanded(
+            child: GridView.count(
+              crossAxisCount: 2,
+              padding: const EdgeInsets.all(16),
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: 0.9,
+              children: filteredServices.map((entry) {
+                final key = entry.key;
+                final name = entry.value['name'];
+                final prices = entry.value['prices'] as Map<String, dynamic>;
+                final desc = entry.value['description'] ?? "";
+                final price = prices[widget.vehicleType] as int;
+
+                return Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 3,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          key,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          name,
+                          style: const TextStyle(fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                        if (desc.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            desc,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                        const Spacer(),
+                        Text(
+                          "₱$price",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: () => widget.onAddToCart(
+                              key,
+                              widget.vehicleType,
+                              price,
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.yellow[700],
+                              foregroundColor: Colors.black,
+                            ),
+                            child: const Text("Add"),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
       ),
     );
   }
