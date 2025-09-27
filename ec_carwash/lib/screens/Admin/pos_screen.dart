@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // ✅ Firestore
 import 'package:ec_carwash/data_models/services_data.dart';
 import 'package:ec_carwash/data_models/inventory_data.dart';
 import 'package:ec_carwash/data_models/customer_data.dart';
@@ -16,13 +17,30 @@ class POSScreen extends StatefulWidget {
 
 class _POSScreenState extends State<POSScreen> {
   final List<Map<String, dynamic>> cart = [];
+
   Customer? currentCustomer;
+  String? _currentCustomerId;
+  String? _vehicleTypeForCustomer; // ← use this; if null we’ll ask once
 
   // Controllers for customer form
   final TextEditingController nameController = TextEditingController();
   final TextEditingController plateController = TextEditingController();
   final TextEditingController emailController = TextEditingController();
   final TextEditingController phoneController = TextEditingController();
+
+  // Time picker state (defaults to now)
+  TimeOfDay _selectedTime = TimeOfDay.now();
+
+  String _formatTimeOfDay(BuildContext ctx, TimeOfDay tod) {
+    try {
+      return MaterialLocalizations.of(ctx).formatTimeOfDay(tod);
+    } catch (_) {
+      final h = tod.hourOfPeriod.toString().padLeft(2, '0');
+      final m = tod.minute.toString().padLeft(2, '0');
+      final ap = tod.period == DayPeriod.am ? 'AM' : 'PM';
+      return '$h:$m $ap';
+    }
+  }
 
   bool isSearching = false;
   List<Customer> _searchResults = <Customer>[];
@@ -36,7 +54,6 @@ class _POSScreenState extends State<POSScreen> {
   void initState() {
     super.initState();
     _loadServices();
-    // Ensure searchResults is properly initialized
     _searchResults = <Customer>[];
   }
 
@@ -49,36 +66,27 @@ class _POSScreenState extends State<POSScreen> {
       });
     } catch (e) {
       setState(() => _isLoadingServices = false);
-      print('Error loading services: $e');
+      debugPrint('Error loading services: $e');
     }
   }
 
-  // Convert Firebase services to the format expected by POS
   Map<String, Map<String, dynamic>> get servicesData {
     final Map<String, Map<String, dynamic>> data = {};
     for (final service in _services) {
-      data[service.code] = {
-        'name': service.name,
-        'prices': service.prices,
-      };
+      data[service.code] = {'name': service.name, 'prices': service.prices};
     }
     return data;
   }
 
-
-  // Only map accessories/add-ons to inventory, not main car wash services
-  // Main services (EC1-EC8, etc.) are always available and don't consume inventory
-  // Services use inventory items but availability isn't restricted by stock
   final Map<String, String> serviceToInventoryMap = {
-    // Services consume these inventory items but are always available
-    'EC1': 'INV001', // Basic wash uses Car Shampoo
-    'EC2': 'INV003', // Premium wash uses Armor All Spray Wax
-    'EC3': 'INV004', // Deluxe wash uses Hand Wax
-    'EC4': 'INV005', // Polish service uses Polishing Compound
-    'EC6': 'INV011', // Interior cleaning uses Interior Cleaner
-    'EC7': 'INV007', // Engine cleaning uses Engine Degreaser
-    'EC9': 'INV006', // Window service uses Glass Cleaner
-    'EC14': 'INV006', // Headlight restoration uses Glass Cleaner
+    'EC1': 'INV001',
+    'EC2': 'INV003',
+    'EC3': 'INV004',
+    'EC4': 'INV005',
+    'EC6': 'INV011',
+    'EC7': 'INV007',
+    'EC9': 'INV006',
+    'EC14': 'INV006',
   };
 
   double get total => cart.fold(0.0, (sum, item) {
@@ -87,12 +95,7 @@ class _POSScreenState extends State<POSScreen> {
     return sum + price.toDouble() * qty;
   });
 
-  Future<bool> _checkInventoryAvailability(String code) async {
-    // All services are always available regardless of inventory stock
-    // This is because services are the main business offering
-    // Inventory consumption happens after service completion
-    return true;
-  }
+  Future<bool> _checkInventoryAvailability(String code) async => true;
 
   Future<void> _consumeInventory(String code, int quantity) async {
     final inventoryId = serviceToInventoryMap[code];
@@ -106,8 +109,8 @@ class _POSScreenState extends State<POSScreen> {
     if (!isAvailable) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Insufficient inventory for service $code'),
+          const SnackBar(
+            content: Text('Insufficient inventory for this service'),
             backgroundColor: Colors.red,
           ),
         );
@@ -145,6 +148,8 @@ class _POSScreenState extends State<POSScreen> {
   void _clearCustomer() {
     setState(() {
       currentCustomer = null;
+      _currentCustomerId = null;
+      _vehicleTypeForCustomer = null;
       nameController.clear();
       plateController.clear();
       emailController.clear();
@@ -153,27 +158,50 @@ class _POSScreenState extends State<POSScreen> {
     });
   }
 
-  void _searchByPlate(String plateNumber) async {
-    if (plateNumber.length >= 3) {
-      setState(() => isSearching = true);
-      try {
-        final customer = await CustomerService.getCustomerByPlateNumber(plateNumber);
-        if (customer != null) {
-          _selectCustomer(customer);
-        } else {
-          setState(() {
-            _searchResults.clear();
-            isSearching = false;
-          });
-        }
-      } catch (e) {
-        setState(() => isSearching = false);
+  // Read Firestore directly for reliable keys (email/contactNumber/vehicleType)
+  Future<void> _loadCustomerByPlateFromFirestore(String plate) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('Customers')
+          .where('plateNumber', isEqualTo: plate.toUpperCase())
+          .limit(1)
+          .get();
+
+      if (snap.docs.isEmpty) {
+        setState(() {
+          _currentCustomerId = null;
+          _vehicleTypeForCustomer = null;
+        });
+        return;
       }
+
+      final doc = snap.docs.first;
+      final data = doc.data();
+
+      nameController.text = (data['name'] ?? '').toString();
+      plateController.text = (data['plateNumber'] ?? '').toString();
+      emailController.text = (data['email'] ?? '').toString();
+      phoneController.text = (data['contactNumber'] ?? '').toString();
+
+      setState(() {
+        _currentCustomerId = doc.id;
+        _vehicleTypeForCustomer = (data['vehicleType'] ?? '')?.toString();
+      });
+    } catch (e) {
+      debugPrint('Failed to load customer by plate: $e');
+    }
+  }
+
+  void _searchByPlate(String plateNumber) async {
+    if (plateNumber.trim().length >= 3) {
+      setState(() => isSearching = true);
+      await _loadCustomerByPlateFromFirestore(plateNumber.trim());
+      setState(() => isSearching = false);
     }
   }
 
   void _searchByName(String name) async {
-    if (name.length >= 2) {
+    if (name.trim().length >= 2) {
       setState(() => isSearching = true);
       try {
         final customers = await CustomerService.searchCustomersByName(name);
@@ -192,16 +220,52 @@ class _POSScreenState extends State<POSScreen> {
     }
   }
 
-  void _selectCustomer(Customer customer) {
+  Future<void> _selectCustomer(Customer customer) async {
     setState(() {
       currentCustomer = customer;
       nameController.text = customer.name;
       plateController.text = customer.plateNumber;
-      emailController.text = customer.email;
-      phoneController.text = customer.phoneNumber;
+    });
+    await _loadCustomerByPlateFromFirestore(customer.plateNumber);
+    setState(() {
       _searchResults.clear();
+      isSearching = false;
     });
   }
+
+  // ---------- NEW: Upsert by plateNumber in 'Customers' ----------
+  Future<String> _saveOrUpdateCustomerByPlate(Customer base) async {
+    final col = FirebaseFirestore.instance.collection('Customers');
+    final plate = base.plateNumber.toUpperCase();
+
+    final query = await col
+        .where('plateNumber', isEqualTo: plate)
+        .limit(1)
+        .get();
+
+    // Common data to write
+    final Map<String, dynamic> data = {
+      'name': base.name,
+      'plateNumber': plate,
+      'email': base.email,
+      'contactNumber': base.phoneNumber,
+      if (_vehicleTypeForCustomer != null &&
+          _vehicleTypeForCustomer!.isNotEmpty)
+        'vehicleType': _vehicleTypeForCustomer,
+      'lastVisit': base.lastVisit.toIso8601String(),
+    };
+
+    if (query.docs.isNotEmpty) {
+      final id = query.docs.first.id;
+      await col.doc(id).set(data, SetOptions(merge: true));
+      return id; // updated existing
+    } else {
+      data['createdAt'] = DateTime.now().toIso8601String();
+      final doc = await col.add(data);
+      return doc.id; // created new
+    }
+  }
+  // ---------------------------------------------------------------
 
   void _saveCustomer() async {
     if (nameController.text.isEmpty || plateController.text.isEmpty) {
@@ -214,19 +278,23 @@ class _POSScreenState extends State<POSScreen> {
     }
 
     try {
-      final customer = Customer(
+      final base = Customer(
         id: currentCustomer?.id,
-        name: nameController.text,
-        plateNumber: plateController.text,
-        email: emailController.text,
-        phoneNumber: phoneController.text,
+        name: nameController.text.trim(),
+        plateNumber: plateController.text.trim().toUpperCase(),
+        email: emailController.text.trim(),
+        phoneNumber: phoneController.text.trim(),
         createdAt: currentCustomer?.createdAt ?? DateTime.now(),
         lastVisit: DateTime.now(),
+        vehicleType: _vehicleTypeForCustomer,
       );
 
-      final customerId = await CustomerService.saveCustomer(customer);
+      // ⬇️ Use the upsert-by-plate logic (update if exists, create if not)
+      final customerId = await _saveOrUpdateCustomerByPlate(base);
+
       setState(() {
-        currentCustomer = customer.copyWith(id: customerId);
+        currentCustomer = base.copyWith(id: customerId);
+        _currentCustomerId = customerId;
       });
 
       if (mounted) {
@@ -236,13 +304,31 @@ class _POSScreenState extends State<POSScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving customer: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error saving customer: $e')));
       }
     }
   }
 
+  // Add service: if saved vehicleType exists, use it; else ask once.
+  Future<void> _handleAddService(String code) async {
+    final product = servicesData[code];
+    if (product == null) return;
+
+    final prices = (product["prices"] as Map<String, dynamic>);
+    final vt = _vehicleTypeForCustomer;
+
+    if (vt != null && vt.isNotEmpty && prices.containsKey(vt)) {
+      final price = (prices[vt] as num).toDouble();
+      await _addSingleCodeToCart(code, vt, price);
+      return;
+    }
+
+    _showVehicleTypeDialog(code); // ask only if not saved
+  }
+
+  // ⬇️ Dialog now has NO checkbox; it only lets user pick once when none is saved
   void _showVehicleTypeDialog(String code) {
     final product = servicesData[code];
     if (product == null) return;
@@ -262,18 +348,18 @@ class _POSScreenState extends State<POSScreen> {
               const SizedBox(height: 16),
               ...priceEntries.map((entry) {
                 final vehicleType = entry.key;
-                final price = entry.value;
+                final price = (entry.value as num).toDouble();
                 IconData icon = Icons.directions_car;
                 Color color = Colors.blue;
 
-                // Set icons based on vehicle type
                 if (vehicleType.contains('Motorcycle')) {
                   icon = Icons.motorcycle;
                   color = Colors.green;
                 } else if (vehicleType.contains('Truck')) {
                   icon = Icons.local_shipping;
                   color = Colors.red;
-                } else if (vehicleType.contains('Van') || vehicleType.contains('SUV')) {
+                } else if (vehicleType.contains('Van') ||
+                    vehicleType.contains('SUV')) {
                   icon = Icons.airport_shuttle;
                   color = Colors.orange;
                 } else if (vehicleType.contains('Tricycle')) {
@@ -284,10 +370,16 @@ class _POSScreenState extends State<POSScreen> {
                 return ListTile(
                   leading: Icon(icon, color: color),
                   title: Text(vehicleType),
-                  subtitle: Text('₱${price.toString()}'),
+                  subtitle: Text('₱${price.toStringAsFixed(2)}'),
                   onTap: () async {
                     Navigator.pop(context);
-                    await _addSingleCodeToCart(code, vehicleType, price.toDouble());
+                    // Remember automatically the first time (since nothing saved yet)
+                    await _addSingleCodeToCart(
+                      code,
+                      vehicleType,
+                      price,
+                      remember: true,
+                    );
                   },
                 );
               }),
@@ -298,11 +390,38 @@ class _POSScreenState extends State<POSScreen> {
     );
   }
 
+  Future<void> _persistVehicleTypeIfNeeded(
+    String category,
+    bool remember,
+  ) async {
+    if (_currentCustomerId == null) return;
 
-  Future<void> _addSingleCodeToCart(String code, String category, double price) async {
+    final hasSaved =
+        _vehicleTypeForCustomer != null && _vehicleTypeForCustomer!.isNotEmpty;
+    final changing = _vehicleTypeForCustomer != category;
+    final shouldPersist = !hasSaved || remember;
+
+    if (changing && shouldPersist) {
+      await FirebaseFirestore.instance
+          .collection('Customers')
+          .doc(_currentCustomerId)
+          .set({'vehicleType': category}, SetOptions(merge: true));
+
+      setState(() {
+        _vehicleTypeForCustomer = category;
+      });
+    }
+  }
+
+  Future<void> _addSingleCodeToCart(
+    String code,
+    String category,
+    double price, {
+    bool remember = false,
+  }) async {
     await addToCart(code, category, price);
+    await _persistVehicleTypeIfNeeded(category, remember);
 
-    // Show success message
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -314,8 +433,6 @@ class _POSScreenState extends State<POSScreen> {
     }
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     if (_isLoadingServices) {
@@ -325,9 +442,7 @@ class _POSScreenState extends State<POSScreen> {
     final isWide = MediaQuery.of(context).size.width > 700;
     final codes = servicesData.keys.toList();
 
-    // Sort codes in proper order: EC1-15, UPGRADE1-4, PROMO1-4
     codes.sort((a, b) {
-      // Helper function to get sort priority
       int getSortPriority(String code) {
         if (code.startsWith('EC')) return 1;
         if (code.startsWith('UPGRADE')) return 2;
@@ -335,144 +450,126 @@ class _POSScreenState extends State<POSScreen> {
         return 4;
       }
 
-      // Helper function to extract number from code
       int getCodeNumber(String code) {
         final numStr = code.replaceAll(RegExp(r'[^0-9]'), '');
         return int.tryParse(numStr) ?? 0;
       }
 
-      final priorityA = getSortPriority(a);
-      final priorityB = getSortPriority(b);
-
-      if (priorityA != priorityB) {
-        return priorityA.compareTo(priorityB);
-      }
-
-      // Within same category, sort by number
+      final pa = getSortPriority(a), pb = getSortPriority(b);
+      if (pa != pb) return pa.compareTo(pb);
       return getCodeNumber(a).compareTo(getCodeNumber(b));
     });
 
     return Row(
-        children: [
-          /// Product Codes Grid
-          Expanded(
-            flex: 4,
-            child: GridView.builder(
-              padding: const EdgeInsets.all(16),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: MediaQuery.of(context).size.width > 1400 ? 6 :
-                               MediaQuery.of(context).size.width > 1200 ? 5 : 4,
-                childAspectRatio: 0.85,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-              ),
-              itemCount: codes.length,
-              itemBuilder: (context, index) {
-                final code = codes[index];
-                final product = servicesData[code];
-                if (product == null) return const SizedBox();
+      children: [
+        // Product Codes Grid
+        Expanded(
+          flex: 4,
+          child: GridView.builder(
+            padding: const EdgeInsets.all(16),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: MediaQuery.of(context).size.width > 1400
+                  ? 6
+                  : MediaQuery.of(context).size.width > 1200
+                  ? 5
+                  : 4,
+              childAspectRatio: 0.85,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemCount: codes.length,
+            itemBuilder: (context, index) {
+              final code = codes[index];
+              final product = servicesData[code];
+              if (product == null) return const SizedBox();
 
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () {
-                      // Show vehicle type selection dialog immediately
-                      _showVehicleTypeDialog(code);
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            Colors.white,
-                            Color(0xFFF8F9FA),
-                            Colors.white,
-                          ],
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () =>
+                      _handleAddService(code), // auto-vehicleType or ask once
+                  // ⛔ removed onLongPress to prevent changing when saved
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Colors.white, Color(0xFFF8F9FA), Colors.white],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.grey.shade300, width: 1),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withValues(alpha: 0.2),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
                         ),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.grey.shade300,
-                          width: 1,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withValues(alpha: 0.2),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
+                      ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade800,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              code,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Expanded(
+                            child: Center(
+                              child: Text(
+                                product["name"],
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade700,
+                                  height: 1.3,
+                                ),
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(10.0),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade800,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                code,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Expanded(
-                              child: Center(
-                                child: Text(
-                                  product["name"],
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.grey.shade700,
-                                    height: 1.3,
-                                  ),
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
                     ),
                   ),
-                );
-              },
+                ),
+              );
+            },
+          ),
+        ),
+
+        // Side panel
+        if (isWide)
+          Expanded(
+            flex: 2,
+            child: Column(
+              children: [
+                Expanded(flex: 2, child: _buildCustomerForm()),
+                Expanded(flex: 3, child: _buildCart()),
+              ],
             ),
           ),
-
-          /// Product Details + Cart (side panel on wide screen)
-          if (isWide)
-            Expanded(
-              flex: 2,
-              child: Column(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: _buildCustomerForm(),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: _buildCart(),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      );
+      ],
+    );
   }
 
   Widget _buildCustomerForm() {
@@ -482,140 +579,170 @@ class _POSScreenState extends State<POSScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-          Row(
-            children: [
-              const Icon(Icons.person, color: Colors.grey),
-              const SizedBox(width: 8),
-              const Text(
-                "Customer Information",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-              const Spacer(),
-              if (currentCustomer != null)
-                IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: () => _clearCustomer(),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Plate Number Field
-          TextField(
-            controller: plateController,
-            decoration: const InputDecoration(
-              labelText: "Plate Number",
-              prefixIcon: Icon(Icons.directions_car),
-              border: OutlineInputBorder(),
-            ),
-            onChanged: (value) => _searchByPlate(value),
-            textCapitalization: TextCapitalization.characters,
-          ),
-          const SizedBox(height: 12),
-
-          // Customer Name Field
-          TextField(
-            controller: nameController,
-            decoration: const InputDecoration(
-              labelText: "Customer Name",
-              prefixIcon: Icon(Icons.person),
-              border: OutlineInputBorder(),
-            ),
-            onChanged: (value) => _searchByName(value),
-          ),
-          const SizedBox(height: 12),
-
-          // Email Field
-          TextField(
-            controller: emailController,
-            decoration: const InputDecoration(
-              labelText: "Email",
-              prefixIcon: Icon(Icons.email),
-              border: OutlineInputBorder(),
-            ),
-            keyboardType: TextInputType.emailAddress,
-          ),
-          const SizedBox(height: 12),
-
-          // Phone Field
-          TextField(
-            controller: phoneController,
-            decoration: const InputDecoration(
-              labelText: "Phone Number",
-              prefixIcon: Icon(Icons.phone),
-              border: OutlineInputBorder(),
-            ),
-            keyboardType: TextInputType.phone,
-          ),
-          const SizedBox(height: 16),
-
-          // Search Results
-          if (searchResults.isNotEmpty)
-            Container(
-              height: 150,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: ListView.builder(
-                itemCount: searchResults.length,
-                itemBuilder: (context, index) {
-                  final customer = searchResults[index];
-                  return ListTile(
-                    title: Text(customer.name),
-                    subtitle: Text(customer.plateNumber),
-                    onTap: () => _selectCustomer(customer),
-                  );
-                },
-              ),
-            ),
-          if (searchResults.isNotEmpty) const SizedBox(height: 16),
-
-          // Quick Service Selection Info
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              border: Border.all(color: Colors.blue.shade200),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
+            Row(
               children: [
-                Icon(Icons.info_outline, color: Colors.blue.shade700),
+                const Icon(Icons.person, color: Colors.grey),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    "Tap any service card to add it directly to cart",
-                    style: TextStyle(
-                      color: Colors.blue.shade700,
-                      fontSize: 14,
-                    ),
+                const Text(
+                  "Customer Information",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+                const Spacer(),
+                if (_currentCustomerId != null || currentCustomer != null)
+                  IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: _clearCustomer,
                   ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Plate Number Field (autofill trigger)
+            TextField(
+              controller: plateController,
+              decoration: const InputDecoration(
+                labelText: "Plate Number",
+                prefixIcon: Icon(Icons.directions_car),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: _searchByPlate,
+              textCapitalization: TextCapitalization.characters,
+            ),
+            const SizedBox(height: 12),
+
+            // Customer Name Field
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: "Customer Name",
+                prefixIcon: Icon(Icons.person),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: _searchByName,
+            ),
+            const SizedBox(height: 12),
+
+            // Email Field
+            TextField(
+              controller: emailController,
+              decoration: const InputDecoration(
+                labelText: "Email",
+                prefixIcon: Icon(Icons.email),
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.emailAddress,
+            ),
+            const SizedBox(height: 12),
+
+            // Contact Number Field
+            TextField(
+              controller: phoneController,
+              decoration: const InputDecoration(
+                labelText: "Contact Number",
+                prefixIcon: Icon(Icons.phone),
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.phone,
+            ),
+            const SizedBox(height: 12),
+
+            // Time Picker
+            Row(
+              children: [
+                const Icon(Icons.access_time, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  "Time: ${_formatTimeOfDay(context, _selectedTime)}",
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  icon: const Icon(Icons.edit),
+                  label: const Text("Pick Time"),
+                  onPressed: () async {
+                    final picked = await showTimePicker(
+                      context: context,
+                      initialTime: _selectedTime,
+                    );
+                    if (picked != null) {
+                      setState(() => _selectedTime = picked);
+                    }
+                  },
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 12),
 
-          const SizedBox(height: 16),
-
-          // Save Customer Button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _saveCustomer,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.yellow.shade700,
-                foregroundColor: Colors.black,
+            // Search Results
+            if (searchResults.isNotEmpty)
+              Container(
+                height: 150,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: ListView.builder(
+                  itemCount: searchResults.length,
+                  itemBuilder: (context, index) {
+                    final customer = searchResults[index];
+                    return ListTile(
+                      title: Text(customer.name),
+                      subtitle: Text(customer.plateNumber),
+                      onTap: () => _selectCustomer(customer),
+                    );
+                  },
+                ),
               ),
-              child: Text(currentCustomer == null ? "Save New Customer" : "Update Customer"),
+            if (searchResults.isNotEmpty) const SizedBox(height: 16),
+
+            // Tip text updated (no override path now)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                border: Border.all(color: Colors.blue.shade200),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.blue.shade700),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Tap a service to add it. If the customer has a saved vehicle type, it will be used automatically.",
+                      style: TextStyle(
+                        color: Colors.blue.shade700,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+
+            const SizedBox(height: 16),
+
+            // Save Customer Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _saveCustomer,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.yellow.shade700,
+                  foregroundColor: Colors.black,
+                ),
+                child: Text(
+                  _currentCustomerId == null && (currentCustomer?.id == null)
+                      ? "Save New Customer"
+                      : "Update Customer",
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
-
 
   Widget _buildCart() {
     return Container(
@@ -665,7 +792,7 @@ class _POSScreenState extends State<POSScreen> {
                   ),
                 ),
                 ElevatedButton(
-                  onPressed: cart.isEmpty ? null : () => _showCartSummary(),
+                  onPressed: cart.isEmpty ? null : _showCartSummary,
                   child: const Text("Checkout"),
                 ),
               ],
@@ -692,7 +819,6 @@ class _POSScreenState extends State<POSScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // List of services
                     ...cart.map((item) {
                       final price = (item["price"] as num).toDouble();
                       final qty = (item["quantity"] ?? 0) as int;
@@ -706,8 +832,6 @@ class _POSScreenState extends State<POSScreen> {
                       );
                     }),
                     const Divider(),
-
-                    // Totals
                     Text(
                       "Total: ₱${total.toStringAsFixed(2)}",
                       style: const TextStyle(
@@ -716,11 +840,11 @@ class _POSScreenState extends State<POSScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-
-                    // Cash input
                     TextField(
                       controller: cashController,
-                      keyboardType: TextInputType.number,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       decoration: const InputDecoration(
                         labelText: "Cash",
                         border: OutlineInputBorder(),
@@ -733,7 +857,6 @@ class _POSScreenState extends State<POSScreen> {
                       },
                     ),
                     const SizedBox(height: 12),
-
                     Text(
                       "Change: ₱${change.toStringAsFixed(2)}",
                       style: const TextStyle(fontWeight: FontWeight.bold),
@@ -755,6 +878,12 @@ class _POSScreenState extends State<POSScreen> {
                             final quantity = item["quantity"] as int;
                             await _consumeInventory(code, quantity);
                           }
+
+                          await _saveTransactionToFirestore(
+                            cash: double.tryParse(cashController.text) ?? 0,
+                            change: change,
+                          );
+
                           if (mounted) {
                             Navigator.pop(context);
                             _showReceipt(
@@ -771,6 +900,78 @@ class _POSScreenState extends State<POSScreen> {
         );
       },
     );
+  }
+
+  Future<void> _saveTransactionToFirestore({
+    required double cash,
+    required double change,
+  }) async {
+    try {
+      final now = DateTime.now();
+      final txnDateTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        _selectedTime.hour,
+        _selectedTime.minute,
+      );
+
+      // build customer data
+      final customerMap = {
+        "id": _currentCustomerId ?? currentCustomer?.id,
+        "plateNumber": plateController.text.trim().toUpperCase(),
+        "name": nameController.text.trim(),
+        "email": emailController.text.trim(),
+        "contactNumber": phoneController.text.trim(),
+        "vehicleType": _vehicleTypeForCustomer,
+      };
+
+      // build cart items
+      final items = cart.map((e) {
+        final price = (e["price"] as num).toDouble();
+        final qty = (e["quantity"] as int);
+        final subtotal = price * qty;
+        return {
+          "serviceCode": e["code"],
+          "vehicleType": e["category"],
+          "price": price,
+          "quantity": qty,
+          "subtotal": subtotal,
+        };
+      }).toList();
+
+      // compute total explicitly
+      final double totalAmount = items.fold(
+        0.0,
+        (sum, item) => sum + (item["subtotal"] as double),
+      );
+
+      final payload = {
+        "customer": customerMap,
+        "items": items,
+        "total": totalAmount, // ✅ ensure total saved
+        "cash": cash,
+        "change": change,
+        "date": Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
+        "time": {
+          "hour": _selectedTime.hour,
+          "minute": _selectedTime.minute,
+          "formatted": _formatTimeOfDay(context, _selectedTime),
+        },
+        "createdAt":
+            FieldValue.serverTimestamp(), // ✅ serverTimestamp for consistency
+        "transactionAt": Timestamp.fromDate(txnDateTime),
+        "status": "paid",
+      };
+
+      await FirebaseFirestore.instance.collection("Transactions").add(payload);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error saving transaction: $e")));
+      }
+    }
   }
 
   void _showReceipt({required double cash, required double change}) {
@@ -807,7 +1008,14 @@ class _POSScreenState extends State<POSScreen> {
               onPressed: () async {
                 final pdf = pw.Document();
 
-                // ✅ Load embedded fonts
+                final String formattedTime = _formatTimeOfDay(
+                  this.context,
+                  _selectedTime,
+                );
+                final String formattedDate = DateTime.now()
+                    .toString()
+                    .substring(0, 10);
+
                 final robotoRegular = pw.Font.ttf(
                   await rootBundle.load("Roboto-Regular.ttf"),
                 );
@@ -817,7 +1025,7 @@ class _POSScreenState extends State<POSScreen> {
 
                 pdf.addPage(
                   pw.Page(
-                    build: (pw.Context context) {
+                    build: (pw.Context ctx) {
                       return pw.DefaultTextStyle(
                         style: pw.TextStyle(font: robotoRegular, fontSize: 12),
                         child: pw.Column(
@@ -830,107 +1038,57 @@ class _POSScreenState extends State<POSScreen> {
                                 fontSize: 20,
                               ),
                             ),
+                            pw.SizedBox(height: 6),
+                            pw.Text(
+                              "Date: $formattedDate   Time: $formattedTime",
+                            ),
                             pw.SizedBox(height: 10),
-
-                            // 🧾 Table for items
                             pw.Table(
                               border: pw.TableBorder.all(width: 0.5),
                               columnWidths: {
-                                0: const pw.FlexColumnWidth(2), // Service
-                                1: const pw.FlexColumnWidth(1), // Qty
-                                2: const pw.FlexColumnWidth(1), // Price
-                                3: const pw.FlexColumnWidth(1.5), // Subtotal
+                                0: const pw.FlexColumnWidth(2),
+                                1: const pw.FlexColumnWidth(1),
+                                2: const pw.FlexColumnWidth(1),
+                                3: const pw.FlexColumnWidth(1.5),
                               },
                               children: [
-                                // Header row
                                 pw.TableRow(
                                   decoration: const pw.BoxDecoration(
                                     color: PdfColors.grey300,
                                   ),
                                   children: [
-                                    pw.Padding(
-                                      padding: const pw.EdgeInsets.all(4),
-                                      child: pw.Text(
-                                        "Service",
-                                        style: pw.TextStyle(
-                                          font: robotoBold,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
-                                    pw.Padding(
-                                      padding: const pw.EdgeInsets.all(4),
-                                      child: pw.Text(
-                                        "Qty",
-                                        style: pw.TextStyle(
-                                          font: robotoBold,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
-                                    pw.Padding(
-                                      padding: const pw.EdgeInsets.all(4),
-                                      child: pw.Text(
-                                        "Price",
-                                        style: pw.TextStyle(
-                                          font: robotoBold,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
-                                    pw.Padding(
-                                      padding: const pw.EdgeInsets.all(4),
-                                      child: pw.Text(
-                                        "Subtotal",
-                                        style: pw.TextStyle(
-                                          font: robotoBold,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
+                                    _cell("Service", robotoBold),
+                                    _cell("Qty", robotoBold),
+                                    _cell("Price", robotoBold),
+                                    _cell("Subtotal", robotoBold),
                                   ],
                                 ),
-
-                                // Item rows
                                 ...cart.map((item) {
                                   final price = (item["price"] as num)
                                       .toDouble();
                                   final qty = (item["quantity"] ?? 0) as int;
                                   final subtotal = price * qty;
-
                                   return pw.TableRow(
                                     children: [
-                                      pw.Padding(
-                                        padding: const pw.EdgeInsets.all(4),
-                                        child: pw.Text(
-                                          "${item["code"]} - ${item["category"]}",
-                                        ),
+                                      _cell(
+                                        "${item["code"]} - ${item["category"]}",
+                                        robotoRegular,
                                       ),
-                                      pw.Padding(
-                                        padding: const pw.EdgeInsets.all(4),
-                                        child: pw.Text("$qty"),
+                                      _cell("$qty", robotoRegular),
+                                      _cell(
+                                        "₱${price.toStringAsFixed(2)}",
+                                        robotoRegular,
                                       ),
-                                      pw.Padding(
-                                        padding: const pw.EdgeInsets.all(4),
-                                        child: pw.Text(
-                                          "₱${price.toStringAsFixed(2)}",
-                                        ),
-                                      ),
-                                      pw.Padding(
-                                        padding: const pw.EdgeInsets.all(4),
-                                        child: pw.Text(
-                                          "₱${subtotal.toStringAsFixed(2)}",
-                                        ),
+                                      _cell(
+                                        "₱${subtotal.toStringAsFixed(2)}",
+                                        robotoRegular,
                                       ),
                                     ],
                                   );
                                 }),
                               ],
                             ),
-
                             pw.SizedBox(height: 12),
-
-                            // Totals
                             pw.Row(
                               mainAxisAlignment: pw.MainAxisAlignment.end,
                               children: [
@@ -951,7 +1109,6 @@ class _POSScreenState extends State<POSScreen> {
                                 ),
                               ],
                             ),
-
                             pw.SizedBox(height: 20),
                             pw.Text(
                               "Thank you for your payment!",
@@ -967,19 +1124,14 @@ class _POSScreenState extends State<POSScreen> {
                   ),
                 );
 
-                // Save/share PDF
                 await Printing.sharePdf(
                   bytes: await pdf.save(),
                   filename: "receipt.pdf",
                 );
 
                 if (mounted) {
-                  setState(() {
-                    cart.clear();
-                  });
-                  if (mounted && context.mounted) {
-                    Navigator.pop(context);
-                  }
+                  setState(() => cart.clear());
+                  if (context.mounted) Navigator.pop(context);
                 }
               },
               child: const Text("Print as PDF"),
@@ -990,3 +1142,8 @@ class _POSScreenState extends State<POSScreen> {
     );
   }
 }
+
+pw.Widget _cell(String text, pw.Font font) => pw.Padding(
+  padding: const pw.EdgeInsets.all(4),
+  child: pw.Text(text, style: pw.TextStyle(font: font, fontSize: 12)),
+);
