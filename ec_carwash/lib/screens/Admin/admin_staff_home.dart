@@ -4,6 +4,7 @@ import 'pos_screen.dart';
 import 'inventory_screen.dart';
 import 'services_screen.dart';
 import 'scheduling_screen.dart';
+import 'transactions_screen.dart';
 
 class AdminStaffHome extends StatefulWidget {
   const AdminStaffHome({super.key});
@@ -457,6 +458,8 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         return _buildDashboard();
       case "POS":
         return const POSScreen();
+      case "Transactions":
+        return const TransactionsScreen();
       case "Inventory":
         return const InventoryScreen();
       case "Services":

@@ -163,12 +163,16 @@ class BookingManager {
       final QuerySnapshot query = await _firestore
           .collection(_collection)
           .where('status', isEqualTo: status)
-          .orderBy('selectedDateTime', descending: false)
           .get();
 
-      return query.docs.map((doc) {
+      final bookings = query.docs.map((doc) {
         return Booking.fromJson(doc.data() as Map<String, dynamic>, doc.id);
       }).toList();
+
+      // Sort in memory to avoid composite index requirement
+      bookings.sort((a, b) => a.selectedDateTime.compareTo(b.selectedDateTime));
+
+      return bookings;
     } catch (e) {
       throw Exception('Failed to get bookings by status: $e');
     }

@@ -89,10 +89,10 @@ class _POSScreenState extends State<POSScreen> {
     'EC14': 'INV006',
   };
 
-  double get total => cart.fold(0.0, (sum, item) {
+  double get total => cart.fold(0.0, (total, item) {
     final price = (item["price"] ?? 0) as num;
     final qty = (item["quantity"] ?? 0) as int;
-    return sum + price.toDouble() * qty;
+    return total + price.toDouble() * qty;
   });
 
   Future<bool> _checkInventoryAvailability(String code) async => true;
@@ -943,7 +943,7 @@ class _POSScreenState extends State<POSScreen> {
       // compute total explicitly
       final double totalAmount = items.fold(
         0.0,
-        (sum, item) => sum + (item["subtotal"] as double),
+        (total, item) => total + (item["subtotal"] as double),
       );
 
       final payload = {
@@ -964,7 +964,12 @@ class _POSScreenState extends State<POSScreen> {
         "status": "paid",
       };
 
-      await FirebaseFirestore.instance.collection("Transactions").add(payload);
+      // Save transaction
+      final transactionRef = await FirebaseFirestore.instance.collection("Transactions").add(payload);
+
+      // Also create a booking record with "approved" status (since POS transactions are immediate)
+      await _createBookingFromPOSTransaction(transactionRef.id, txnDateTime, customerMap, items, totalAmount);
+
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -972,6 +977,55 @@ class _POSScreenState extends State<POSScreen> {
         ).showSnackBar(SnackBar(content: Text("Error saving transaction: $e")));
       }
     }
+  }
+
+  Future<void> _createBookingFromPOSTransaction(
+    String transactionId,
+    DateTime txnDateTime,
+    Map<String, dynamic> customerMap,
+    List<Map<String, dynamic>> items,
+    double totalAmount,
+  ) async {
+    try {
+      // Convert POS items to booking services format
+      final services = items.map((item) {
+        return {
+          "serviceCode": item["serviceCode"],
+          "serviceName": _getServiceName(item["serviceCode"]),
+          "vehicleType": item["vehicleType"],
+          "price": item["price"],
+        };
+      }).toList();
+
+      // Create booking data with "approved" status (POS transactions are immediate)
+      final bookingData = {
+        "userId": customerMap["id"] ?? "",
+        "userEmail": customerMap["email"] ?? "",
+        "userName": customerMap["name"] ?? "",
+        "plateNumber": customerMap["plateNumber"] ?? "",
+        "contactNumber": customerMap["contactNumber"] ?? "",
+        "selectedDateTime": Timestamp.fromDate(txnDateTime),
+        "date": txnDateTime.toIso8601String(),
+        "time": "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}",
+        "services": services,
+        "status": "approved", // POS transactions are automatically approved
+        "createdAt": FieldValue.serverTimestamp(),
+        "source": "pos", // Mark as coming from POS
+        "transactionId": transactionId, // Reference to the transaction
+      };
+
+      // Save to Bookings collection
+      await FirebaseFirestore.instance.collection("Bookings").add(bookingData);
+    } catch (e) {
+      // Log error but don't fail the transaction
+      debugPrint('Failed to create booking from POS transaction: $e');
+    }
+  }
+
+  String _getServiceName(String serviceCode) {
+    // Get service name from servicesData
+    final service = servicesData[serviceCode];
+    return service?['name'] ?? serviceCode;
   }
 
   void _showReceipt({required double cash, required double change}) {
