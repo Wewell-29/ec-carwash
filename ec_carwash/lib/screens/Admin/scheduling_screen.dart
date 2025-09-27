@@ -14,6 +14,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
   List<Booking> _pendingBookings = [];
   List<Booking> _approvedBookings = [];
   List<Booking> _completedBookings = [];
+  List<Booking> _cancelledBookings = [];
   bool _isLoading = true;
   String _selectedFilter = 'all'; // all, today
 
@@ -26,22 +27,30 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
   Future<void> _loadBookings() async {
     setState(() => _isLoading = true);
     try {
-      List<Booking> allBookings;
+      List<Booking> allBookings = [];
       if (_selectedFilter == 'today') {
         allBookings = await BookingManager.getTodayBookings();
       } else {
         allBookings = await BookingManager.getAllBookings();
       }
 
+
       // Separate bookings by status for Kanban columns
       setState(() {
         _pendingBookings = allBookings.where((b) => b.status == 'pending').toList();
         _approvedBookings = allBookings.where((b) => b.status == 'approved').toList();
         _completedBookings = allBookings.where((b) => b.status == 'completed').toList();
+        _cancelledBookings = allBookings.where((b) => b.status == 'cancelled').toList();
         _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      setState(() {
+        _pendingBookings = [];
+        _approvedBookings = [];
+        _completedBookings = [];
+        _cancelledBookings = [];
+        _isLoading = false;
+      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading bookings: $e')),
@@ -57,6 +66,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       booking = _pendingBookings.where((b) => b.id == bookingId).firstOrNull;
       booking ??= _approvedBookings.where((b) => b.id == bookingId).firstOrNull;
       booking ??= _completedBookings.where((b) => b.id == bookingId).firstOrNull;
+      booking ??= _cancelledBookings.where((b) => b.id == bookingId).firstOrNull;
 
       if (booking == null) return;
 
@@ -248,39 +258,23 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       backgroundColor: Colors.grey.shade100,
       body: Column(
         children: [
-          // Filter buttons and summary
+          // Header with filters only
           Container(
             padding: const EdgeInsets.all(16),
-            child: Column(
+            child: Row(
               children: [
-                // Summary row
-                Row(
-                  children: [
-                    _buildSummaryCard('Pending', _pendingBookings.length, Colors.orange),
-                    const SizedBox(width: 12),
-                    _buildSummaryCard('Approved', _approvedBookings.length, Colors.blue),
-                    const SizedBox(width: 12),
-                    _buildSummaryCard('Completed', _completedBookings.length, Colors.green),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.refresh),
-                      onPressed: _loadBookings,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                // Filter buttons
-                Row(
-                  children: [
-                    _buildFilterChip('All', 'all'),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('Today', 'today'),
-                  ],
+                _buildFilterChip('All', 'all'),
+                const SizedBox(width: 8),
+                _buildFilterChip('Today', 'today'),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _loadBookings,
                 ),
               ],
             ),
           ),
-          // Kanban Board
+          // Kanban Board with 4 columns
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -296,7 +290,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                           Icons.schedule,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       // Approved Column
                       Expanded(
                         child: _buildKanbanColumn(
@@ -306,7 +300,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                           Icons.check_circle,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       // Completed Column
                       Expanded(
                         child: _buildKanbanColumn(
@@ -314,6 +308,16 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                           _completedBookings,
                           Colors.green,
                           Icons.done_all,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Cancelled Column
+                      Expanded(
+                        child: _buildKanbanColumn(
+                          'Cancelled',
+                          _cancelledBookings,
+                          Colors.red,
+                          Icons.cancel,
                         ),
                       ),
                     ],
@@ -324,37 +328,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     );
   }
 
-  Widget _buildSummaryCard(String title, int count, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              count.toString(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildKanbanColumn(String title, List<Booking> bookings, Color color, IconData icon) {
     return Container(
@@ -413,7 +386,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
           ),
           // Column Content
           Expanded(
-            child: bookings.isEmpty
+            child: (bookings.isEmpty)
                 ? const Center(
                     child: Padding(
                       padding: EdgeInsets.all(20),
@@ -427,6 +400,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                     padding: const EdgeInsets.all(8),
                     itemCount: bookings.length,
                     itemBuilder: (context, index) {
+                      if (index >= bookings.length) return const SizedBox.shrink();
                       final booking = bookings[index];
                       return _buildKanbanCard(booking);
                     },
@@ -452,8 +426,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
   }
 
   Widget _buildKanbanCard(Booking booking) {
-    final isUpcoming = booking.selectedDateTime.isAfter(DateTime.now());
-
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 2,
@@ -463,46 +435,61 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header - Customer name and time
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    booking.userName.isNotEmpty ? booking.userName : 'Unknown Customer',
+            // Header - Customer name
+            Text(
+              booking.userName.isNotEmpty ? booking.userName : 'Unknown Customer',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 8),
+            // Date and Time - Highlighted
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.schedule,
+                    size: 14,
+                    color: Colors.blue,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    DateFormat('MMM dd, yyyy').format(booking.selectedDateTime),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                      fontSize: 13,
+                      color: Colors.blue,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-                Text(
-                  booking.time,
-                  style: TextStyle(
-                    color: isUpcoming ? Colors.green.shade700 : Colors.grey.shade600,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 12,
+                  const SizedBox(width: 8),
+                  Text(
+                    booking.time,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.blue,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-            const SizedBox(height: 6),
-            // Plate and contact
+            const SizedBox(height: 8),
+            // Plate number
             Text(
               booking.plateNumber,
               style: TextStyle(
                 color: Colors.grey.shade700,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              DateFormat('MMM dd, yyyy').format(booking.selectedDateTime),
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: 11,
               ),
             ),
             const SizedBox(height: 8),
@@ -535,30 +522,47 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
   Widget _buildKanbanCardActions(Booking booking) {
     if (booking.status == 'pending') {
-      return Row(
+      return Column(
         children: [
-          Expanded(
-            child: ElevatedButton(
-              onPressed: () => _updateBookingStatus(booking.id!, 'approved'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                textStyle: const TextStyle(fontSize: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'approved') : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    textStyle: const TextStyle(fontSize: 12),
+                  ),
+                  child: const Text('Approve'),
+                ),
               ),
-              child: const Text('Approve'),
-            ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'cancelled') : null,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    textStyle: const TextStyle(fontSize: 12),
+                  ),
+                  child: const Text('Reject'),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: OutlinedButton(
-              onPressed: () => _updateBookingStatus(booking.id!, 'cancelled'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                textStyle: const TextStyle(fontSize: 12),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: booking.id != null ? () => _showRescheduleDialog(booking) : null,
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.orange,
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                textStyle: const TextStyle(fontSize: 11),
               ),
-              child: const Text('Reject'),
+              child: const Text('Reschedule'),
             ),
           ),
         ],
@@ -569,7 +573,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => _updateBookingStatus(booking.id!, 'completed'),
+              onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'completed') : null,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
                 foregroundColor: Colors.white,
@@ -583,7 +587,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
           SizedBox(
             width: double.infinity,
             child: TextButton(
-              onPressed: () => _showRescheduleDialog(booking),
+              onPressed: booking.id != null ? () => _showRescheduleDialog(booking) : null,
               style: TextButton.styleFrom(
                 foregroundColor: Colors.orange,
                 padding: const EdgeInsets.symmetric(vertical: 2),
@@ -594,13 +598,13 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
           ),
         ],
       );
-    } else {
+    } else if (booking.status == 'completed') {
       // Completed - no actions needed
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.green.shade50,
+          color: Colors.green.shade100,
           borderRadius: BorderRadius.circular(4),
         ),
         child: Text(
@@ -608,6 +612,25 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
           textAlign: TextAlign.center,
           style: TextStyle(
             color: Colors.green.shade700,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
+    } else {
+      // Cancelled - no actions needed
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.red.shade100,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'Booking Cancelled',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.red.shade700,
             fontSize: 11,
             fontWeight: FontWeight.w500,
           ),
