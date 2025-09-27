@@ -3,6 +3,7 @@ import 'package:ec_carwash/data_models/inventory_data.dart';
 import 'pos_screen.dart';
 import 'inventory_screen.dart';
 import 'services_screen.dart';
+import 'scheduling_screen.dart';
 
 class AdminStaffHome extends StatefulWidget {
   const AdminStaffHome({super.key});
@@ -41,6 +42,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       "Inventory",
       "Expenses",
       "Services",
+      "Scheduling",
       "Analytics",
     ];
     return items;
@@ -114,17 +116,33 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         ),
       ),
       drawer: isDesktop ? null : _buildDrawer(menuItems),
-      body: Row(
-        children: [
-          if (isDesktop) _buildSideNav(menuItems),
-          Expanded(
-            child: Container(
+      body: isDesktop
+          ? Stack(
+              children: [
+                // Sidebar that extends full height
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: _buildSideNav(menuItems),
+                ),
+                // Main content with left margin
+                Positioned(
+                  left: 280,
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    color: Colors.white,
+                    child: _buildPage(menuItems[_selectedIndex]),
+                  ),
+                ),
+              ],
+            )
+          : Container(
               color: Colors.white,
               child: _buildPage(menuItems[_selectedIndex]),
             ),
-          ),
-        ],
-      ),
       floatingActionButton: _selectedIndex == 3 // Inventory
           ? FloatingActionButton.extended(
               onPressed: () {
@@ -148,6 +166,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       "Inventory": Icons.inventory_2_outlined,
       "Expenses": Icons.money_off_outlined,
       "Services": Icons.build_outlined,
+      "Scheduling": Icons.calendar_today_outlined,
       "Analytics": Icons.analytics_outlined,
     };
 
@@ -284,6 +303,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       "Inventory": Icons.inventory_2_outlined,
       "Expenses": Icons.money_off_outlined,
       "Services": Icons.build_outlined,
+      "Scheduling": Icons.calendar_today_outlined,
       "Analytics": Icons.analytics_outlined,
     };
 
@@ -294,27 +314,25 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       "Inventory": Icons.inventory_2,
       "Expenses": Icons.money_off,
       "Services": Icons.build,
+      "Scheduling": Icons.calendar_today,
       "Analytics": Icons.analytics,
     };
 
     return Container(
       width: 280,
+      height: double.infinity,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            const Color(0xFF333333),
-            Colors.grey.shade800,
-            Colors.grey.shade900,
+            const Color(0xFF1a1a1a),
             Colors.black,
+            const Color(0xFF333333),
+            Colors.grey.shade900,
           ],
         ),
         border: Border(
-          top: BorderSide(
-            color: const Color(0xFF444444),
-            width: 1,
-          ),
           right: BorderSide(
             color: Colors.yellow.shade700.withValues(alpha: 0.4),
             width: 3,
@@ -322,8 +340,13 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
+            color: Colors.yellow.shade700.withValues(alpha: 0.1),
             blurRadius: 4,
+            offset: const Offset(2, 0),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 8,
             offset: const Offset(1, 0),
           ),
         ],
@@ -438,6 +461,8 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         return const InventoryScreen();
       case "Services":
         return const ServicesScreen();
+      case "Scheduling":
+        return const SchedulingScreen();
       default:
         return Center(
           child: Text(

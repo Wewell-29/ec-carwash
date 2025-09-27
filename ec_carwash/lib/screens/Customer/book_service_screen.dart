@@ -139,6 +139,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
               },
             )
             .toList(),
+        "status": "pending", // Default status for customer bookings
         "createdAt": FieldValue.serverTimestamp(),
       };
 
