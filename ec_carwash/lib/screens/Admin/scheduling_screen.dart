@@ -59,6 +59,209 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     }
   }
 
+  Future<void> _showTeamSelectionForApproval(Booking booking) async {
+    String? selectedTeam;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false, // Prevent dismissing without selection
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.groups, color: Colors.green.shade600),
+                  const SizedBox(width: 8),
+                  const Text("Assign Team & Approve"),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "Customer: ${booking.userName}",
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  Text("Plate: ${booking.plateNumber}"),
+                  Text("Total: ₱${booking.totalAmount.toStringAsFixed(2)}"),
+                  const SizedBox(height: 20),
+                  const Text(
+                    "Which team will handle this booking?",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              selectedTeam = "Team A";
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: selectedTeam == "Team A"
+                                  ? Colors.blue.shade100
+                                  : Colors.grey.shade100,
+                              border: Border.all(
+                                color: selectedTeam == "Team A"
+                                    ? Colors.blue.shade600
+                                    : Colors.grey.shade300,
+                                width: selectedTeam == "Team A" ? 3 : 1,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.group,
+                                  size: 40,
+                                  color: selectedTeam == "Team A"
+                                      ? Colors.blue.shade600
+                                      : Colors.grey.shade600,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  "Team A",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: selectedTeam == "Team A"
+                                        ? Colors.blue.shade600
+                                        : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              selectedTeam = "Team B";
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: selectedTeam == "Team B"
+                                  ? Colors.green.shade100
+                                  : Colors.grey.shade100,
+                              border: Border.all(
+                                color: selectedTeam == "Team B"
+                                    ? Colors.green.shade600
+                                    : Colors.grey.shade300,
+                                width: selectedTeam == "Team B" ? 3 : 1,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.group,
+                                  size: 40,
+                                  color: selectedTeam == "Team B"
+                                      ? Colors.green.shade600
+                                      : Colors.grey.shade600,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  "Team B",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: selectedTeam == "Team B"
+                                        ? Colors.green.shade600
+                                        : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancel"),
+                ),
+                ElevatedButton(
+                  onPressed: selectedTeam != null
+                      ? () async {
+                          Navigator.pop(context);
+                          await _updateBookingStatusWithTeam(
+                            booking.id!,
+                            'approved',
+                            selectedTeam!,
+                          );
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green.shade600,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                  child: const Text("Approve & Assign"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _updateBookingStatusWithTeam(String bookingId, String status, String team) async {
+    try {
+      // Find the booking from all lists
+      Booking? booking;
+      booking = _pendingBookings.where((b) => b.id == bookingId).firstOrNull;
+      booking ??= _approvedBookings.where((b) => b.id == bookingId).firstOrNull;
+      booking ??= _completedBookings.where((b) => b.id == bookingId).firstOrNull;
+      booking ??= _cancelledBookings.where((b) => b.id == bookingId).firstOrNull;
+      if (booking == null) return;
+
+      // Update booking status with team assignment
+      await FirebaseFirestore.instance
+          .collection('Bookings')
+          .doc(bookingId)
+          .update({
+        'status': status,
+        'assignedTeam': team,
+        'teamCommission': booking.totalAmount * 0.35, // 35% commission
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      await _loadBookings(); // Refresh the list
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Booking $status and assigned to $team'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating booking: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _updateBookingStatus(String bookingId, String status) async {
     try {
       // Find the booking from all lists
@@ -528,7 +731,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'approved') : null,
+                  onPressed: booking.id != null ? () => _showTeamSelectionForApproval(booking) : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,

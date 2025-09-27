@@ -5,6 +5,7 @@ import 'inventory_screen.dart';
 import 'services_screen.dart';
 import 'scheduling_screen.dart';
 import 'transactions_screen.dart';
+import 'payroll_screen.dart';
 
 class AdminStaffHome extends StatefulWidget {
   const AdminStaffHome({super.key});
@@ -44,6 +45,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       "Expenses",
       "Services",
       "Scheduling",
+      "Payroll",
       "Analytics",
     ];
     return items;
@@ -466,6 +468,8 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         return const ServicesScreen();
       case "Scheduling":
         return const SchedulingScreen();
+      case "Payroll":
+        return const PayrollScreen();
       default:
         return Center(
           child: Text(

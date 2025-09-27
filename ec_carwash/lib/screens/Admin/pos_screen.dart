@@ -28,8 +28,14 @@ class _POSScreenState extends State<POSScreen> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController phoneController = TextEditingController();
 
+  // Vehicle type for the customer form
+  String? _selectedVehicleType;
+
   // Time picker state (defaults to now)
   TimeOfDay _selectedTime = TimeOfDay.now();
+
+  // UI state for showing new customer form
+  bool _showNewCustomerForm = false;
 
   String _formatTimeOfDay(BuildContext ctx, TimeOfDay tod) {
     try {
@@ -43,6 +49,7 @@ class _POSScreenState extends State<POSScreen> {
   }
 
   bool isSearching = false;
+  bool _hasSearched = false;
   List<Customer> _searchResults = <Customer>[];
   List<Customer> get searchResults => _searchResults;
 
@@ -150,11 +157,14 @@ class _POSScreenState extends State<POSScreen> {
       currentCustomer = null;
       _currentCustomerId = null;
       _vehicleTypeForCustomer = null;
+      _selectedVehicleType = null;
       nameController.clear();
       plateController.clear();
       emailController.clear();
       phoneController.clear();
       _searchResults.clear();
+      isSearching = false;
+      _hasSearched = false; // Reset search state to return cart to normal size
     });
   }
 
@@ -186,39 +196,78 @@ class _POSScreenState extends State<POSScreen> {
       setState(() {
         _currentCustomerId = doc.id;
         _vehicleTypeForCustomer = (data['vehicleType'] ?? '')?.toString();
+        _selectedVehicleType = _vehicleTypeForCustomer;
       });
     } catch (e) {
       debugPrint('Failed to load customer by plate: $e');
     }
   }
 
-  void _searchByPlate(String plateNumber) async {
-    if (plateNumber.trim().length >= 3) {
-      setState(() => isSearching = true);
-      await _loadCustomerByPlateFromFirestore(plateNumber.trim());
-      setState(() => isSearching = false);
+
+  void _performSearch(String query) async {
+    setState(() {
+      isSearching = true;
+      _hasSearched = false;
+      _searchResults.clear();
+    });
+
+    try {
+      // Try plate search first (more specific)
+      if (query.length >= 3) {
+        final customer = await CustomerService.getCustomerByPlateNumber(query);
+        if (customer != null) {
+          setState(() {
+            _searchResults = [customer];
+            isSearching = false;
+            _hasSearched = true;
+          });
+          return;
+        }
+      }
+
+      // If no plate results, try name search
+      if (query.length >= 2) {
+        // Try different case variations
+        final variations = [
+          query.trim(),
+          query.toLowerCase(),
+          query.trim().toLowerCase().replaceFirst(query.trim().toLowerCase()[0], query.trim().toLowerCase()[0].toUpperCase()),
+        ];
+
+        for (final variation in variations) {
+          try {
+            final customers = await CustomerService.searchCustomersByName(variation);
+            if (customers.isNotEmpty) {
+              setState(() {
+                _searchResults = customers;
+                isSearching = false;
+                _hasSearched = true;
+              });
+              return;
+            }
+          } catch (e) {
+            debugPrint('Search variation failed for "$variation": $e');
+          }
+        }
+      }
+
+      // No results found
+      setState(() {
+        _searchResults.clear();
+        isSearching = false;
+        _hasSearched = true;
+      });
+    } catch (e) {
+      setState(() {
+        _searchResults.clear();
+        isSearching = false;
+        _hasSearched = true;
+      });
+      debugPrint('Search failed: $e');
     }
   }
 
-  void _searchByName(String name) async {
-    if (name.trim().length >= 2) {
-      setState(() => isSearching = true);
-      try {
-        final customers = await CustomerService.searchCustomersByName(name);
-        setState(() {
-          _searchResults = customers;
-          isSearching = false;
-        });
-      } catch (e) {
-        setState(() {
-          _searchResults.clear();
-          isSearching = false;
-        });
-      }
-    } else {
-      setState(() => _searchResults.clear());
-    }
-  }
+
 
   Future<void> _selectCustomer(Customer customer) async {
     setState(() {
@@ -230,6 +279,7 @@ class _POSScreenState extends State<POSScreen> {
     setState(() {
       _searchResults.clear();
       isSearching = false;
+      _hasSearched = false; // Reset search state to return cart to normal size
     });
   }
 
@@ -249,9 +299,8 @@ class _POSScreenState extends State<POSScreen> {
       'plateNumber': plate,
       'email': base.email,
       'contactNumber': base.phoneNumber,
-      if (_vehicleTypeForCustomer != null &&
-          _vehicleTypeForCustomer!.isNotEmpty)
-        'vehicleType': _vehicleTypeForCustomer,
+      if (_selectedVehicleType != null && _selectedVehicleType!.isNotEmpty)
+        'vehicleType': _selectedVehicleType,
       'lastVisit': base.lastVisit.toIso8601String(),
     };
 
@@ -286,7 +335,7 @@ class _POSScreenState extends State<POSScreen> {
         phoneNumber: phoneController.text.trim(),
         createdAt: currentCustomer?.createdAt ?? DateTime.now(),
         lastVisit: DateTime.now(),
-        vehicleType: _vehicleTypeForCustomer,
+        vehicleType: _selectedVehicleType,
       );
 
       // ⬇️ Use the upsert-by-plate logic (update if exists, create if not)
@@ -295,6 +344,7 @@ class _POSScreenState extends State<POSScreen> {
       setState(() {
         currentCustomer = base.copyWith(id: customerId);
         _currentCustomerId = customerId;
+        _vehicleTypeForCustomer = _selectedVehicleType;
       });
 
       if (mounted) {
@@ -563,8 +613,15 @@ class _POSScreenState extends State<POSScreen> {
             flex: 2,
             child: Column(
               children: [
-                Expanded(flex: 2, child: _buildCustomerForm()),
-                Expanded(flex: 3, child: _buildCart()),
+                // Dynamic sizing based on search state
+                Expanded(
+                  flex: _getCustomerFormFlex(),
+                  child: _buildCustomerForm()
+                ),
+                Expanded(
+                  flex: _getCartFlex(),
+                  child: _buildCart()
+                ),
               ],
             ),
           ),
@@ -595,149 +652,628 @@ class _POSScreenState extends State<POSScreen> {
                   ),
               ],
             ),
-            const SizedBox(height: 16),
-
-            // Plate Number Field (autofill trigger)
-            TextField(
-              controller: plateController,
-              decoration: const InputDecoration(
-                labelText: "Plate Number",
-                prefixIcon: Icon(Icons.directions_car),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: _searchByPlate,
-              textCapitalization: TextCapitalization.characters,
-            ),
             const SizedBox(height: 12),
 
-            // Customer Name Field
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: "Customer Name",
-                prefixIcon: Icon(Icons.person),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: _searchByName,
-            ),
-            const SizedBox(height: 12),
-
-            // Email Field
-            TextField(
-              controller: emailController,
-              decoration: const InputDecoration(
-                labelText: "Email",
-                prefixIcon: Icon(Icons.email),
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 12),
-
-            // Contact Number Field
-            TextField(
-              controller: phoneController,
-              decoration: const InputDecoration(
-                labelText: "Contact Number",
-                prefixIcon: Icon(Icons.phone),
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.phone,
-            ),
-            const SizedBox(height: 12),
-
-            // Time Picker
-            Row(
-              children: [
-                const Icon(Icons.access_time, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  "Time: ${_formatTimeOfDay(context, _selectedTime)}",
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+            if (!_showNewCustomerForm) ...[
+              // Show selected customer or search mode
+              if (currentCustomer != null || _currentCustomerId != null) ...[
+                // Selected Customer Display
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.green.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.check_circle, color: Colors.green.shade600),
+                          const SizedBox(width: 8),
+                          const Text(
+                            "Customer Selected",
+                            style: TextStyle(fontWeight: FontWeight.w600, color: Colors.green),
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: () {
+                              _clearCustomer();
+                              setState(() {
+                                _showNewCustomerForm = false;
+                              });
+                            },
+                            icon: const Icon(Icons.edit),
+                            label: const Text("Change Customer"),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  nameController.text,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Icon(Icons.directions_car, size: 16, color: Colors.grey.shade600),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      plateController.text,
+                                      style: TextStyle(
+                                        color: Colors.grey.shade700,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    if (_vehicleTypeForCustomer != null && _vehicleTypeForCustomer!.isNotEmpty) ...[
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue.shade100,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          _vehicleTypeForCustomer!,
+                                          style: TextStyle(
+                                            color: Colors.blue.shade700,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                if (emailController.text.isNotEmpty) ...[
+                                  const SizedBox(height: 2),
+                                  Row(
+                                    children: [
+                                      Icon(Icons.email, size: 16, color: Colors.grey.shade600),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        emailController.text,
+                                        style: TextStyle(
+                                          color: Colors.grey.shade700,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                if (phoneController.text.isNotEmpty) ...[
+                                  const SizedBox(height: 2),
+                                  Row(
+                                    children: [
+                                      Icon(Icons.phone, size: 16, color: Colors.grey.shade600),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        phoneController.text,
+                                        style: TextStyle(
+                                          color: Colors.grey.shade700,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const Spacer(),
-                TextButton.icon(
-                  icon: const Icon(Icons.edit),
-                  label: const Text("Pick Time"),
-                  onPressed: () async {
-                    final picked = await showTimePicker(
-                      context: context,
-                      initialTime: _selectedTime,
-                    );
-                    if (picked != null) {
-                      setState(() => _selectedTime = picked);
-                    }
-                  },
+              ] else ...[
+                // Quick Search Mode
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: plateController,
+                        decoration: InputDecoration(
+                          labelText: "Search by Plate or Name",
+                          hintText: "e.g. ABC1234 or John Doe (Press Enter to search)",
+                          prefixIcon: Icon(Icons.search, color: Colors.blue.shade600),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: Colors.blue.shade600, width: 2),
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey.shade50,
+                          suffixIcon: plateController.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () {
+                                    plateController.clear();
+                                    nameController.clear();
+                                    setState(() {
+                                      _searchResults.clear();
+                                      isSearching = false;
+                                      _hasSearched = false;
+                                    });
+                                  },
+                                )
+                              : null,
+                        ),
+                        onChanged: (value) {
+                          setState(() {
+                            _hasSearched = false; // Reset when user types
+                          });
+                        },
+                        onSubmitted: (value) {
+                          final query = value.trim();
+                          if (query.isNotEmpty) {
+                            _performSearch(query);
+                          }
+                        },
+                        textCapitalization: TextCapitalization.characters,
+                        textInputAction: TextInputAction.search,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _showNewCustomerForm = true;
+                          _selectedVehicleType = null;
+                          plateController.clear();
+                          nameController.clear();
+                          _searchResults.clear();
+                          isSearching = false;
+                          _hasSearched = false;
+                        });
+                      },
+                      icon: const Icon(Icons.person_add),
+                      label: const Text("New Customer"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
+            ] else ...[
+              // New Customer Form Mode
+              Row(
+                children: [
+                  const Text(
+                    "Adding New Customer",
+                    style: TextStyle(fontWeight: FontWeight.w600, color: Colors.green),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _showNewCustomerForm = false;
+                        _selectedVehicleType = null;
+                        plateController.clear();
+                        nameController.clear();
+                        emailController.clear();
+                        phoneController.clear();
+                      });
+                    },
+                    icon: const Icon(Icons.arrow_back),
+                    label: const Text("Back to Search"),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
 
-            // Search Results
-            if (searchResults.isNotEmpty)
-              Container(
-                height: 150,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(8),
+              // Plate Number Field (autofill trigger)
+              TextField(
+                controller: plateController,
+                decoration: InputDecoration(
+                  labelText: "Plate Number *",
+                  hintText: "e.g. ABC1234",
+                  prefixIcon: Icon(Icons.directions_car, color: Colors.blue.shade600),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.blue.shade600, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
                 ),
-                child: ListView.builder(
-                  itemCount: searchResults.length,
-                  itemBuilder: (context, index) {
-                    final customer = searchResults[index];
-                    return ListTile(
-                      title: Text(customer.name),
-                      subtitle: Text(customer.plateNumber),
-                      onTap: () => _selectCustomer(customer),
-                    );
-                  },
+                textCapitalization: TextCapitalization.characters,
+              ),
+              const SizedBox(height: 12),
+
+              // Customer Name Field
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText: "Customer Name *",
+                  hintText: "e.g. John Doe",
+                  prefixIcon: Icon(Icons.person, color: Colors.blue.shade600),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.blue.shade600, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
                 ),
               ),
-            if (searchResults.isNotEmpty) const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
-            // Tip text
+              // Email Field
+              TextField(
+                controller: emailController,
+                decoration: InputDecoration(
+                  labelText: "Email (Optional)",
+                  hintText: "e.g. john@example.com",
+                  prefixIcon: Icon(Icons.email, color: Colors.blue.shade600),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.blue.shade600, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                ),
+                keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 12),
+
+              // Contact Number Field
+              TextField(
+                controller: phoneController,
+                decoration: InputDecoration(
+                  labelText: "Contact Number (Optional)",
+                  hintText: "e.g. +63 912 345 6789",
+                  prefixIcon: Icon(Icons.phone, color: Colors.blue.shade600),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.blue.shade600, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                ),
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 12),
+
+              // Vehicle Type Field
+              DropdownButtonFormField<String>(
+                initialValue: _selectedVehicleType,
+                decoration: InputDecoration(
+                  labelText: "Vehicle Type (Optional)",
+                  hintText: "Select vehicle type",
+                  prefixIcon: Icon(Icons.directions_car, color: Colors.blue.shade600),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.blue.shade600, width: 2),
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                ),
+                items: _getVehicleTypeOptions().map((String vehicleType) {
+                  return DropdownMenuItem<String>(
+                    value: vehicleType,
+                    child: Text(vehicleType),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  setState(() {
+                    _selectedVehicleType = newValue;
+                  });
+                },
+              ),
+            ],
+            const SizedBox(height: 16),
+
+            // Loading indicator
+            if (isSearching && !_showNewCustomerForm)
+              Container(
+                padding: const EdgeInsets.all(16),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(width: 12),
+                    Text('Searching...'),
+                  ],
+                ),
+              ),
+
+            // Search Results
+            if (searchResults.isNotEmpty && !_showNewCustomerForm && !isSearching)
+              Container(
+                height: _getSearchResultsMaxHeight(),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  border: Border.all(color: Colors.blue.shade200),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade600,
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.search, color: Colors.white, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Found ${searchResults.length} customer${searchResults.length != 1 ? 's' : ''}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                          if (searchResults.length > 2) ...[
+                            const Spacer(),
+                            Icon(
+                              Icons.swipe_vertical,
+                              color: Colors.white70,
+                              size: 16,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Scroll',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Scrollbar(
+                        thumbVisibility: searchResults.length > 2,
+                        thickness: 4,
+                        radius: const Radius.circular(2),
+                        child: ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: searchResults.length,
+                          itemBuilder: (context, index) {
+                            final customer = searchResults[index];
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                leading: CircleAvatar(
+                                  backgroundColor: Colors.blue.shade100,
+                                  child: Icon(Icons.person, color: Colors.blue.shade700, size: 20),
+                                ),
+                                title: Text(
+                                  customer.name,
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        Icon(Icons.directions_car, size: 14, color: Colors.grey.shade600),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          customer.plateNumber,
+                                          style: TextStyle(
+                                            color: Colors.grey.shade700,
+                                            fontWeight: FontWeight.w500,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        if (customer.vehicleType != null && customer.vehicleType!.isNotEmpty) ...[
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.green.shade100,
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              customer.vehicleType!,
+                                              style: TextStyle(
+                                                color: Colors.green.shade700,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    if (customer.email.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Icon(Icons.email, size: 12, color: Colors.grey.shade500),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
+                                              customer.email,
+                                              style: TextStyle(
+                                                color: Colors.grey.shade600,
+                                                fontSize: 12,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                trailing: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.shade50,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(Icons.chevron_right, color: Colors.blue.shade600, size: 20),
+                                ),
+                                onTap: () => _selectCustomer(customer),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            // No results message
+            if (searchResults.isEmpty && !_showNewCustomerForm && !isSearching && _hasSearched && plateController.text.trim().isNotEmpty)
+              Container(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.orange),
+                    const SizedBox(width: 8),
+                    Text(
+                      'No customers found for "${plateController.text.trim()}"',
+                      style: TextStyle(color: Colors.orange.shade700),
+                    ),
+                  ],
+                ),
+              ),
+
+            if ((searchResults.isNotEmpty || isSearching) && !_showNewCustomerForm) const SizedBox(height: 16),
+
+            // Service Time (always visible and separate from customer data)
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.blue.shade50,
-                border: Border.all(color: Colors.blue.shade200),
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.blue.shade700),
+                  Icon(Icons.access_time, size: 18, color: Colors.blue.shade700),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      "Tap a service to add it. If the customer has a saved vehicle type, it will be used automatically.",
-                      style: TextStyle(
-                        color: Colors.blue.shade700,
-                        fontSize: 14,
-                      ),
+                  Text(
+                    "Service Time: ${_formatTimeOfDay(context, _selectedTime)}",
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue.shade700,
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    icon: const Icon(Icons.edit, size: 16),
+                    label: const Text("Change"),
+                    onPressed: () async {
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: _selectedTime,
+                      );
+                      if (picked != null) {
+                        setState(() => _selectedTime = picked);
+                      }
+                    },
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     ),
                   ),
                 ],
               ),
             ),
-
             const SizedBox(height: 16),
 
-            // Save Customer Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _saveCustomer,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.yellow.shade700,
-                  foregroundColor: Colors.black,
-                ),
-                child: Text(
-                  _currentCustomerId == null && (currentCustomer?.id == null)
-                      ? "Save New Customer"
-                      : "Update Customer",
+            // Save Customer Button (only in new customer form)
+            if (_showNewCustomerForm) ...[
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _saveCustomer,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.yellow.shade700,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    _currentCustomerId == null && (currentCustomer?.id == null)
+                        ? "Save New Customer"
+                        : "Update Customer",
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -873,21 +1409,19 @@ class _POSScreenState extends State<POSScreen> {
                   onPressed: (change < 0)
                       ? null
                       : () async {
+                          final navigator = Navigator.of(context);
+                          final cash = double.tryParse(cashController.text) ?? 0;
+
                           for (final item in cart) {
                             final code = item["code"] as String;
                             final quantity = item["quantity"] as int;
                             await _consumeInventory(code, quantity);
                           }
 
-                          await _saveTransactionToFirestore(
-                            cash: double.tryParse(cashController.text) ?? 0,
-                            change: change,
-                          );
-
                           if (mounted) {
-                            Navigator.pop(context);
-                            _showReceipt(
-                              cash: double.tryParse(cashController.text) ?? 0,
+                            navigator.pop();
+                            _showTeamSelection(
+                              cash: cash,
                               change: change,
                             );
                           }
@@ -906,6 +1440,7 @@ class _POSScreenState extends State<POSScreen> {
   Future<void> _saveTransactionToFirestore({
     required double cash,
     required double change,
+    String? assignedTeam,
   }) async {
     try {
       final now = DateTime.now();
@@ -944,7 +1479,7 @@ class _POSScreenState extends State<POSScreen> {
       // 💵 Totals
       final double totalAmount = services.fold(
         0.0,
-        (sum, item) => sum + (item["subtotal"] as double),
+        (total, item) => total + (item["subtotal"] as double),
       );
 
       // 📘 Transactions collection (uses "services")
@@ -962,6 +1497,8 @@ class _POSScreenState extends State<POSScreen> {
         },
         "transactionAt": Timestamp.fromDate(txnDateTime),
         "status": "paid",
+        "assignedTeam": assignedTeam ?? "Unassigned",
+        "teamCommission": assignedTeam != null ? (totalAmount * 0.35) : 0.0, // 35% commission
         "createdAt": FieldValue.serverTimestamp(),
       };
 
@@ -977,6 +1514,7 @@ class _POSScreenState extends State<POSScreen> {
         customerMap: customerMap,
         services: services,
         totalAmount: totalAmount,
+        assignedTeam: assignedTeam,
       );
     } catch (e) {
       if (mounted) {
@@ -994,6 +1532,7 @@ class _POSScreenState extends State<POSScreen> {
     required Map<String, dynamic> customerMap,
     required List<Map<String, dynamic>> services,
     required double totalAmount,
+    String? assignedTeam,
   }) async {
     try {
       // Follow the customer app booking structure:
@@ -1010,10 +1549,7 @@ class _POSScreenState extends State<POSScreen> {
 
         "selectedDateTime": Timestamp.fromDate(txnDateTime),
         "date": txnDateTime.toIso8601String(),
-        "time": TimeOfDay(
-          hour: txnDateTime.hour,
-          minute: txnDateTime.minute,
-        ).format(context),
+        "time": "${txnDateTime.hour.toString().padLeft(2, '0')}:${txnDateTime.minute.toString().padLeft(2, '0')}",
 
         "services": services, // 🔑 unified key
         "total": totalAmount,
@@ -1021,6 +1557,8 @@ class _POSScreenState extends State<POSScreen> {
         "status": "approved",
         "source": "pos",
         "transactionId": transactionId,
+        "assignedTeam": assignedTeam ?? "Unassigned",
+        "teamCommission": assignedTeam != null ? (totalAmount * 0.35) : 0.0, // 35% commission
 
         "createdAt": FieldValue.serverTimestamp(),
       };
@@ -1036,7 +1574,216 @@ class _POSScreenState extends State<POSScreen> {
     return service?['name'] ?? serviceCode;
   }
 
-  void _showReceipt({required double cash, required double change}) {
+  List<String> _getVehicleTypeOptions() {
+    // Extract vehicle types from all services
+    final Set<String> vehicleTypes = {};
+    for (final service in _services) {
+      vehicleTypes.addAll(service.prices.keys);
+    }
+    return vehicleTypes.toList()..sort();
+  }
+
+  // Dynamic flex calculation for customer form
+  int _getCustomerFormFlex() {
+    // If searching and have results or in search mode, give more space to customer form
+    if ((isSearching || searchResults.isNotEmpty || _hasSearched) && !_showNewCustomerForm) {
+      return 4; // Expanded for search results
+    }
+    return 2; // Normal size
+  }
+
+  // Dynamic flex calculation for cart
+  int _getCartFlex() {
+    // If searching and have results or in search mode, shrink cart
+    if ((isSearching || searchResults.isNotEmpty || _hasSearched) && !_showNewCustomerForm) {
+      return 1; // Smaller during search
+    }
+    return 3; // Normal size
+  }
+
+  // Calculate max height for search results based on available space
+  double _getSearchResultsMaxHeight() {
+    // When customer form is expanded (flex: 4), we have more space
+    if ((isSearching || searchResults.isNotEmpty || _hasSearched) && !_showNewCustomerForm) {
+      // More space available - allow larger search results
+      if (searchResults.length <= 2) {
+        return searchResults.length * 90.0 + 60; // Individual item sizing
+      } else {
+        return 350; // Expanded max height for multiple results
+      }
+    }
+    // Normal state - smaller max height
+    if (searchResults.length <= 2) {
+      return searchResults.length * 80.0 + 60;
+    }
+    return 220; // Original smaller max height
+  }
+
+  void _showTeamSelection({required double cash, required double change}) {
+    String? selectedTeam;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Prevent dismissing without selection
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.groups, color: Colors.blue.shade600),
+                  const SizedBox(width: 8),
+                  const Text("Assign Team"),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    "Which team will handle this service?",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              selectedTeam = "Team A";
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: selectedTeam == "Team A"
+                                  ? Colors.blue.shade100
+                                  : Colors.grey.shade100,
+                              border: Border.all(
+                                color: selectedTeam == "Team A"
+                                    ? Colors.blue.shade600
+                                    : Colors.grey.shade300,
+                                width: selectedTeam == "Team A" ? 3 : 1,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.group,
+                                  size: 40,
+                                  color: selectedTeam == "Team A"
+                                      ? Colors.blue.shade600
+                                      : Colors.grey.shade600,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  "Team A",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: selectedTeam == "Team A"
+                                        ? Colors.blue.shade600
+                                        : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              selectedTeam = "Team B";
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: selectedTeam == "Team B"
+                                  ? Colors.green.shade100
+                                  : Colors.grey.shade100,
+                              border: Border.all(
+                                color: selectedTeam == "Team B"
+                                    ? Colors.green.shade600
+                                    : Colors.grey.shade300,
+                                width: selectedTeam == "Team B" ? 3 : 1,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.group,
+                                  size: 40,
+                                  color: selectedTeam == "Team B"
+                                      ? Colors.green.shade600
+                                      : Colors.grey.shade600,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  "Team B",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: selectedTeam == "Team B"
+                                        ? Colors.green.shade600
+                                        : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: selectedTeam != null
+                      ? () async {
+                          final navigator = Navigator.of(context);
+                          final team = selectedTeam!;
+
+                          await _saveTransactionToFirestore(
+                            cash: cash,
+                            change: change,
+                            assignedTeam: team,
+                          );
+
+                          if (mounted) {
+                            navigator.pop();
+                            _showReceipt(
+                              cash: cash,
+                              change: change,
+                              assignedTeam: team,
+                            );
+                          }
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade600,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                  child: const Text("Confirm Assignment"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showReceipt({required double cash, required double change, String? assignedTeam}) {
     showDialog(
       context: context,
       builder: (context) {
@@ -1058,6 +1805,14 @@ class _POSScreenState extends State<POSScreen> {
                 Text("Total: ₱${total.toStringAsFixed(2)}"),
                 Text("Cash: ₱${cash.toStringAsFixed(2)}"),
                 Text("Change: ₱${change.toStringAsFixed(2)}"),
+                if (assignedTeam != null) ...[
+                  const SizedBox(height: 8),
+                  const Divider(),
+                  Text(
+                    "Assigned Team: $assignedTeam",
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                  ),
+                ],
               ],
             ),
           ),
