@@ -4,6 +4,7 @@ import 'cart_item.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'customer_home.dart';
+import 'booking_history.dart';
 
 class BookServiceScreen extends StatefulWidget {
   const BookServiceScreen({super.key});
@@ -384,7 +385,10 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     } else if (menu == 'Book') {
       // already in Book, do nothing (we keep it highlighted)
     } else if (menu == 'History') {
-      // TODO: implement history page navigation
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const BookingHistoryScreen()),
+      );
     } else if (menu == 'Logout') {
       // TODO: implement logout
     }
