@@ -695,7 +695,7 @@ class _POSScreenState extends State<POSScreen> {
               ),
             if (searchResults.isNotEmpty) const SizedBox(height: 16),
 
-            // Tip text updated (no override path now)
+            // Tip text
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -902,6 +902,7 @@ class _POSScreenState extends State<POSScreen> {
     );
   }
 
+  /// SAVE TO FIRESTORE (Transactions + mirror Booking)
   Future<void> _saveTransactionToFirestore({
     required double cash,
     required double change,
@@ -916,7 +917,7 @@ class _POSScreenState extends State<POSScreen> {
         _selectedTime.minute,
       );
 
-      // build customer data
+      // 👤 Customer (unified shape)
       final customerMap = {
         "id": _currentCustomerId ?? currentCustomer?.id,
         "plateNumber": plateController.text.trim().toUpperCase(),
@@ -926,30 +927,31 @@ class _POSScreenState extends State<POSScreen> {
         "vehicleType": _vehicleTypeForCustomer,
       };
 
-      // build cart items
-      final items = cart.map((e) {
+      // 🧾 Services (unified name & fields)
+      final services = cart.map((e) {
         final price = (e["price"] as num).toDouble();
         final qty = (e["quantity"] as int);
-        final subtotal = price * qty;
         return {
           "serviceCode": e["code"],
+          "serviceName": _getServiceName(e["code"]),
           "vehicleType": e["category"],
           "price": price,
           "quantity": qty,
-          "subtotal": subtotal,
+          "subtotal": price * qty,
         };
       }).toList();
 
-      // compute total explicitly
-      final double totalAmount = items.fold(
+      // 💵 Totals
+      final double totalAmount = services.fold(
         0.0,
-        (total, item) => total + (item["subtotal"] as double),
+        (sum, item) => sum + (item["subtotal"] as double),
       );
 
+      // 📘 Transactions collection (uses "services")
       final payload = {
         "customer": customerMap,
-        "items": items,
-        "total": totalAmount, // ✅ ensure total saved
+        "services": services, // 🔑 unified key
+        "total": totalAmount,
         "cash": cash,
         "change": change,
         "date": Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
@@ -958,18 +960,24 @@ class _POSScreenState extends State<POSScreen> {
           "minute": _selectedTime.minute,
           "formatted": _formatTimeOfDay(context, _selectedTime),
         },
-        "createdAt":
-            FieldValue.serverTimestamp(), // ✅ serverTimestamp for consistency
         "transactionAt": Timestamp.fromDate(txnDateTime),
         "status": "paid",
+        "createdAt": FieldValue.serverTimestamp(),
       };
 
       // Save transaction
-      final transactionRef = await FirebaseFirestore.instance.collection("Transactions").add(payload);
+      final transactionRef = await FirebaseFirestore.instance
+          .collection("Transactions")
+          .add(payload);
 
-      // Also create a booking record with "approved" status (since POS transactions are immediate)
-      await _createBookingFromPOSTransaction(transactionRef.id, txnDateTime, customerMap, items, totalAmount);
-
+      // Create a corresponding approved booking (mirrors customer app schema)
+      await _createBookingFromPOSTransaction(
+        transactionId: transactionRef.id,
+        txnDateTime: txnDateTime,
+        customerMap: customerMap,
+        services: services,
+        totalAmount: totalAmount,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -979,51 +987,51 @@ class _POSScreenState extends State<POSScreen> {
     }
   }
 
-  Future<void> _createBookingFromPOSTransaction(
-    String transactionId,
-    DateTime txnDateTime,
-    Map<String, dynamic> customerMap,
-    List<Map<String, dynamic>> items,
-    double totalAmount,
-  ) async {
+  /// Mirror a booking entry (approved) so lists stay in sync with customer app
+  Future<void> _createBookingFromPOSTransaction({
+    required String transactionId,
+    required DateTime txnDateTime,
+    required Map<String, dynamic> customerMap,
+    required List<Map<String, dynamic>> services,
+    required double totalAmount,
+  }) async {
     try {
-      // Convert POS items to booking services format
-      final services = items.map((item) {
-        return {
-          "serviceCode": item["serviceCode"],
-          "serviceName": _getServiceName(item["serviceCode"]),
-          "vehicleType": item["vehicleType"],
-          "price": item["price"],
-        };
-      }).toList();
-
-      // Create booking data with "approved" status (POS transactions are immediate)
+      // Follow the customer app booking structure:
+      // - selectedDateTime (Timestamp)
+      // - date (ISO)
+      // - time (formatted string)
+      // - services (same array)
       final bookingData = {
         "userId": customerMap["id"] ?? "",
         "userEmail": customerMap["email"] ?? "",
         "userName": customerMap["name"] ?? "",
         "plateNumber": customerMap["plateNumber"] ?? "",
         "contactNumber": customerMap["contactNumber"] ?? "",
+
         "selectedDateTime": Timestamp.fromDate(txnDateTime),
         "date": txnDateTime.toIso8601String(),
-        "time": "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}",
-        "services": services,
-        "status": "approved", // POS transactions are automatically approved
+        "time": TimeOfDay(
+          hour: txnDateTime.hour,
+          minute: txnDateTime.minute,
+        ).format(context),
+
+        "services": services, // 🔑 unified key
+        "total": totalAmount,
+
+        "status": "approved",
+        "source": "pos",
+        "transactionId": transactionId,
+
         "createdAt": FieldValue.serverTimestamp(),
-        "source": "pos", // Mark as coming from POS
-        "transactionId": transactionId, // Reference to the transaction
       };
 
-      // Save to Bookings collection
       await FirebaseFirestore.instance.collection("Bookings").add(bookingData);
     } catch (e) {
-      // Log error but don't fail the transaction
       debugPrint('Failed to create booking from POS transaction: $e');
     }
   }
 
   String _getServiceName(String serviceCode) {
-    // Get service name from servicesData
     final service = servicesData[serviceCode];
     return service?['name'] ?? serviceCode;
   }

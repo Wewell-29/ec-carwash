@@ -32,7 +32,7 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
         MaterialPageRoute(builder: (_) => const BookServiceScreen()),
       );
     } else if (menu == "History") {
-      // already here — optional: do nothing
+      // already here — do nothing
     }
   }
 
@@ -50,7 +50,7 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
       }
 
       if (rawTime != null && rawTime.toString().isNotEmpty) {
-        // supports either "14:30" or maps like {hour: 14, minute: 30, formatted: "2:30 PM"}
+        // supports either "14:30" or maps like {hour: 14, minute: 30, formatted: "..."}
         if (rawTime is Map &&
             rawTime['hour'] != null &&
             rawTime['minute'] != null) {
@@ -98,7 +98,7 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
           ),
         ),
 
-        // Drawer copied to match CustomerHome style
+        // Drawer (matches CustomerHome style)
         drawer: Drawer(
           child: ListView(
             padding: EdgeInsets.zero,
@@ -163,6 +163,7 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
   }
 
   /// COMPLETED = from Transactions where customer.email == user.email
+  /// Reads `services` first, falls back to legacy `items`.
   Widget _buildCompletedTab(User user) {
     final stream = FirebaseFirestore.instance
         .collection('Transactions')
@@ -186,6 +187,7 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
           itemCount: docs.length,
           itemBuilder: (_, i) {
             final data = docs[i].data() as Map<String, dynamic>;
+
             final customer = (data['customer'] as Map<String, dynamic>?) ?? {};
             final plate = (customer['plateNumber'] ?? 'N/A').toString();
 
@@ -193,8 +195,25 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
             final time = data['time']; // may be {hour, minute, formatted}
             final formattedDateTime = _formatDateTime(date, time);
 
-            final items = (data['items'] as List<dynamic>? ?? [])
-                .cast<Map<String, dynamic>>();
+            // Prefer new schema `services`, fallback to old `items`
+            final rawList =
+                (data['services'] ?? data['items']) as List<dynamic>? ?? [];
+            final entries = rawList.cast<Map<String, dynamic>>();
+
+            // Build services label robustly
+            final servicesLabel = entries.isNotEmpty
+                ? entries
+                      .map((e) {
+                        final code = (e['serviceCode'] ?? e['code'] ?? '')
+                            .toString();
+                        final name = (e['serviceName'] ?? '').toString();
+                        final vt = (e['vehicleType'] ?? '').toString();
+                        final title = name.isNotEmpty ? name : code;
+                        return vt.isNotEmpty ? '$title ($vt)' : title;
+                      })
+                      .join(', ')
+                : 'N/A';
+
             final total = (data['total'] ?? 0).toString();
 
             return Card(
@@ -210,11 +229,7 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
                   children: [
                     Text('Date: $formattedDateTime'),
                     const SizedBox(height: 4),
-                    Text(
-                      items.isNotEmpty
-                          ? 'Items: ${items.map((e) => '${e['code']} (${e['vehicleType']})').join(', ')}'
-                          : 'Items: N/A',
-                    ),
+                    Text('Services: $servicesLabel'),
                     const SizedBox(height: 4),
                     Text('Total: ₱$total'),
                   ],
