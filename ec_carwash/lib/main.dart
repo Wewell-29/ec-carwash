@@ -5,6 +5,8 @@ import 'theme.dart';
 import 'screens/login_page.dart';
 import 'screens/Admin/admin_staff_home.dart';
 import 'screens/Customer/customer_home.dart';
+import 'data_models/inventory_data.dart';
+import 'data_models/services_data.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 
@@ -13,6 +15,13 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform, // 👈 required for web
   );
+
+  // Initialize inventory data if Firestore collection is empty
+  await InventoryManager.initializeWithSampleData();
+
+  // Initialize services data if Firestore collection is empty
+  await ServicesManager.initializeWithSampleData();
+
   runApp(const ECCarwashApp());
 }
 
