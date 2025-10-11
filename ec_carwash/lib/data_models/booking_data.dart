@@ -13,6 +13,9 @@ class Booking {
   final List<BookingService> services;
   final DateTime createdAt;
   final String status; // 'pending', 'approved', 'completed', 'cancelled'
+  final String paymentStatus; // 'unpaid', 'paid'
+  final String? source; // 'pos', 'booking' or null for app bookings
+  final String? assignedTeam; // 'Team A', 'Team B', or null
 
   Booking({
     this.id,
@@ -27,6 +30,9 @@ class Booking {
     required this.services,
     required this.createdAt,
     this.status = 'pending',
+    this.paymentStatus = 'unpaid',
+    this.source,
+    this.assignedTeam,
   });
 
   double get totalAmount {
@@ -46,6 +52,9 @@ class Booking {
       'services': services.map((s) => s.toJson()).toList(),
       'createdAt': Timestamp.fromDate(createdAt),
       'status': status,
+      'paymentStatus': paymentStatus,
+      'source': source,
+      'assignedTeam': assignedTeam,
     };
   }
 
@@ -73,6 +82,9 @@ class Booking {
           .toList(),
       createdAt: createdAt,
       status: json['status'] ?? 'pending',
+      paymentStatus: json['paymentStatus'] ?? 'unpaid',
+      source: json['source'],
+      assignedTeam: json['assignedTeam'],
     );
   }
 
@@ -89,6 +101,9 @@ class Booking {
     List<BookingService>? services,
     DateTime? createdAt,
     String? status,
+    String? paymentStatus,
+    String? source,
+    String? assignedTeam,
   }) {
     return Booking(
       id: id ?? this.id,
@@ -103,6 +118,9 @@ class Booking {
       services: services ?? this.services,
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      source: source ?? this.source,
+      assignedTeam: assignedTeam ?? this.assignedTeam,
     );
   }
 }

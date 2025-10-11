@@ -22,6 +22,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
   void initState() {
     super.initState();
     _loadBookings();
+    _fixExistingPOSBookingsPaymentStatus(); // Fix existing POS bookings
   }
 
   Future<void> _loadBookings() async {
@@ -454,6 +455,147 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     }
   }
 
+  Future<void> _showPaymentDialog(Booking booking) async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.payment, color: Colors.orange.shade600),
+              const SizedBox(width: 8),
+              const Text("Payment Required"),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                "Customer: ${booking.userName}",
+                style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
+              Text("Plate: ${booking.plateNumber}"),
+              Text("Total: ₱${booking.totalAmount.toStringAsFixed(2)}"),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.warning,
+                      color: Colors.red.shade600,
+                      size: 40,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      "This booking hasn't been paid yet",
+                      style: TextStyle(
+                        color: Colors.red.shade700,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      "Please confirm payment before approving and assigning a team.",
+                      style: TextStyle(
+                        color: Colors.red.shade600,
+                        fontSize: 14,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await _markAsPaidAndProceed(booking);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green.shade600,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+              child: const Text("Mark as Paid"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _markAsPaidAndProceed(Booking booking) async {
+    try {
+      // Update payment status to paid
+      await FirebaseFirestore.instance
+          .collection('Bookings')
+          .doc(booking.id!)
+          .update({
+        'paymentStatus': 'paid',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      await _loadBookings(); // Refresh the list
+
+      // Show team selection dialog
+      if (mounted) {
+        await _showTeamSelectionForApproval(booking.copyWith(paymentStatus: 'paid'));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating payment status: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _fixExistingPOSBookingsPaymentStatus() async {
+    try {
+      // Find all POS bookings that don't have paymentStatus or have paymentStatus as 'unpaid'
+      final query = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('source', isEqualTo: 'pos')
+          .get();
+
+      final batch = FirebaseFirestore.instance.batch();
+      int updateCount = 0;
+
+      for (final doc in query.docs) {
+        final data = doc.data();
+        final currentPaymentStatus = data['paymentStatus'];
+
+        // If paymentStatus is missing or is 'unpaid', update it to 'paid'
+        if (currentPaymentStatus == null || currentPaymentStatus == 'unpaid') {
+          batch.update(doc.reference, {'paymentStatus': 'paid'});
+          updateCount++;
+        }
+      }
+
+      if (updateCount > 0) {
+        await batch.commit();
+        debugPrint('Fixed payment status for $updateCount POS bookings');
+      }
+    } catch (e) {
+      debugPrint('Error fixing POS booking payment status: $e');
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -705,14 +847,124 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
               ),
             ),
             const SizedBox(height: 4),
-            // Total amount
-            Text(
-              '₱${booking.totalAmount.toStringAsFixed(0)}',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                color: Colors.green,
-              ),
+            // Source and Team Assignment Indicators
+            Row(
+              children: [
+                // Source indicator (POS vs App)
+                if (booking.source == 'pos')
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade100,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.blue.shade300),
+                    ),
+                    child: Text(
+                      'POS',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.shade100,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.purple.shade300),
+                    ),
+                    child: Text(
+                      'APP',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.purple.shade700,
+                      ),
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                // Team assignment indicator
+                if (booking.assignedTeam != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: booking.assignedTeam == 'Team A'
+                          ? Colors.indigo.shade100
+                          : Colors.teal.shade100,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: booking.assignedTeam == 'Team A'
+                            ? Colors.indigo.shade300
+                            : Colors.teal.shade300,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.group,
+                          size: 12,
+                          color: booking.assignedTeam == 'Team A'
+                              ? Colors.indigo.shade700
+                              : Colors.teal.shade700,
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          booking.assignedTeam!,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: booking.assignedTeam == 'Team A'
+                                ? Colors.indigo.shade700
+                                : Colors.teal.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            // Total amount and payment status
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '₱${booking.totalAmount.toStringAsFixed(0)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Colors.green,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: booking.paymentStatus == 'paid'
+                        ? Colors.green.shade100
+                        : Colors.red.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: booking.paymentStatus == 'paid'
+                          ? Colors.green.shade300
+                          : Colors.red.shade300,
+                    ),
+                  ),
+                  child: Text(
+                    booking.paymentStatus == 'paid' ? 'PAID' : 'UNPAID',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: booking.paymentStatus == 'paid'
+                          ? Colors.green.shade700
+                          : Colors.red.shade700,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             // Action buttons (compact)
@@ -725,20 +977,74 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
   Widget _buildKanbanCardActions(Booking booking) {
     if (booking.status == 'pending') {
+      // POS bookings - already paid and don't need team assignment
+      if (booking.source == 'pos') {
+        return Column(
+          children: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'approved') : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+                child: const Text('Approve'),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'cancelled') : null,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      textStyle: const TextStyle(fontSize: 12),
+                    ),
+                    child: const Text('Reject'),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: TextButton(
+                    onPressed: booking.id != null ? () => _showRescheduleDialog(booking) : null,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.orange,
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      textStyle: const TextStyle(fontSize: 11),
+                    ),
+                    child: const Text('Reschedule'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      }
+
+      // App bookings - need payment check and team assignment
       return Column(
         children: [
           Row(
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: booking.id != null ? () => _showTeamSelectionForApproval(booking) : null,
+                  onPressed: booking.id != null
+                      ? () => booking.paymentStatus == 'paid'
+                          ? _showTeamSelectionForApproval(booking)
+                          : _showPaymentDialog(booking)
+                      : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
+                    backgroundColor: booking.paymentStatus == 'paid' ? Colors.green : Colors.orange,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     textStyle: const TextStyle(fontSize: 12),
                   ),
-                  child: const Text('Approve'),
+                  child: Text(booking.paymentStatus == 'paid' ? 'Approve' : 'Pay & Approve'),
                 ),
               ),
               const SizedBox(width: 4),
