@@ -94,14 +94,10 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
     final isWide = MediaQuery.of(context).size.width > 800;
     final categories = ['All', ..._categories];
-    final activeServices = _allServices.where((service) => service.isActive).length;
-    final inactiveServices = _allServices.where((service) => !service.isActive).length;
 
     return Column(
       children: [
-        _buildQuickActions(activeServices),
         _buildFilters(categories, isWide),
-        _buildSummaryCards(activeServices, inactiveServices, isWide),
         Expanded(
           child: _buildServicesList(isWide),
         ),
@@ -109,47 +105,10 @@ class _ServicesScreenState extends State<ServicesScreen> {
     );
   }
 
-  Widget _buildQuickActions(int activeServices) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () => _showAddServiceDialog(),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.yellow.shade700,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                elevation: 3,
-              ),
-              icon: const Icon(Icons.add, weight: 600),
-              label: const Text('Add New Service', style: TextStyle(fontWeight: FontWeight.w600)),
-            ),
-          ),
-          const SizedBox(width: 12),
-          ElevatedButton.icon(
-            onPressed: () => _loadData(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue.shade600,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            icon: const Icon(Icons.refresh),
-            label: const Text('Refresh'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildFilters(List<String> categories, bool isWide) {
+    final activeServices = _allServices.where((service) => service.isActive).length;
+    final totalServices = _allServices.length;
+
     return Container(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -159,10 +118,19 @@ class _ServicesScreenState extends State<ServicesScreen> {
               Expanded(
                 child: TextField(
                   controller: _searchController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Search services...',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.search),
+                    border: const OutlineInputBorder(),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                          )
+                        : null,
                   ),
                   onChanged: (value) {
                     setState(() {
@@ -171,94 +139,57 @@ class _ServicesScreenState extends State<ServicesScreen> {
                   },
                 ),
               ),
-              const SizedBox(width: 16),
-              DropdownButton<String>(
-                value: _selectedCategory,
-                hint: const Text('Category'),
-                onChanged: (value) {
-                  setState(() {
-                    _selectedCategory = value!;
-                  });
-                },
-                items: categories.map((category) {
-                  return DropdownMenuItem(
-                    value: category,
-                    child: Text(category),
-                  );
-                }).toList(),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: DropdownButton<String>(
+                  value: _selectedCategory,
+                  underline: const SizedBox(),
+                  hint: const Text('Category'),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedCategory = value!;
+                    });
+                  },
+                  items: categories.map((category) {
+                    return DropdownMenuItem(
+                      value: category,
+                      child: Text(category),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.yellow.shade50,
+                  border: Border.all(color: Colors.black87, width: 1.5),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.black87, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$activeServices / $totalServices Active',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSummaryCards(int activeServices, int inactiveServices, bool isWide) {
-    final totalServices = activeServices + inactiveServices;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildSummaryCard(
-              'Total Services',
-              totalServices.toString(),
-              Icons.build,
-              Colors.grey.shade700,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _buildSummaryCard(
-              'Active',
-              activeServices.toString(),
-              Icons.check_circle,
-              Colors.green.shade700,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _buildSummaryCard(
-              'Inactive',
-              inactiveServices.toString(),
-              Icons.cancel,
-              Colors.red.shade700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSummaryCard(String title, String value, IconData icon, Color color) {
-    return Card(
-      color: color,
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          children: [
-            Icon(icon, color: Colors.white, size: 24),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Colors.white70,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -277,35 +208,74 @@ class _ServicesScreenState extends State<ServicesScreen> {
       itemCount: services.length,
       itemBuilder: (context, index) {
         final service = services[index];
+        // Shorten code for display: PROMO4 -> PR4, UPGRADE1 -> UP1
+        String displayCode = service.code
+            .replaceAll('PROMO', 'PR')
+            .replaceAll('UPGRADE', 'UP');
+
         return Card(
-          margin: const EdgeInsets.only(bottom: 8),
+          margin: const EdgeInsets.only(bottom: 12),
+          color: Colors.yellow.shade50,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: const BorderSide(color: Colors.black87, width: 1.5),
+          ),
+          elevation: 2,
           child: ExpansionTile(
-            leading: CircleAvatar(
-              backgroundColor: service.isActive ? Colors.green : Colors.red,
-              child: Text(
-                service.code,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.black87, width: 1),
+              ),
+              child: CircleAvatar(
+                backgroundColor: service.isActive ? Colors.yellow.shade700 : Colors.yellow.shade100,
+                child: Text(
+                  displayCode,
+                  style: const TextStyle(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ),
             ),
             title: Text(
               service.name,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+                fontSize: 17,
+              ),
             ),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Category: ${service.category}'),
-                Text('Code: ${service.code}'),
+                const SizedBox(height: 4),
+                Text(
+                  'Category: ${service.category}',
+                  style: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    fontSize: 14,
+                  ),
+                ),
                 if (!service.isActive)
-                  const Text(
-                    'INACTIVE',
-                    style: TextStyle(
-                      color: Colors.red,
-                      fontWeight: FontWeight.bold,
+                  Container(
+                    margin: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.yellow.shade700,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.black87, width: 1),
+                    ),
+                    child: const Text(
+                      'INACTIVE',
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
               ],
@@ -313,14 +283,31 @@ class _ServicesScreenState extends State<ServicesScreen> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Toggle Active/Inactive button
+                ElevatedButton.icon(
+                  onPressed: () => _toggleServiceStatus(service),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: service.isActive ? Colors.yellow.shade700 : Colors.yellow.shade200,
+                    foregroundColor: Colors.black87,
+                    side: const BorderSide(color: Colors.black87, width: 1.5),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    elevation: 2,
+                  ),
+                  icon: Icon(
+                    service.isActive ? Icons.pause_circle_outline : Icons.play_circle_outline,
+                    size: 20,
+                  ),
+                  label: Text(
+                    service.isActive ? 'Active' : 'Inactive',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 PopupMenuButton<String>(
                   onSelected: (value) {
                     switch (value) {
                       case 'edit':
                         _showEditServiceDialog(service);
-                        break;
-                      case 'toggle':
-                        _toggleServiceStatus(service);
                         break;
                       case 'delete':
                         _showDeleteConfirmation(service);
@@ -335,13 +322,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
                         title: Text('Edit'),
                       ),
                     ),
-                    PopupMenuItem(
-                      value: 'toggle',
-                      child: ListTile(
-                        leading: Icon(service.isActive ? Icons.pause : Icons.play_arrow),
-                        title: Text(service.isActive ? 'Deactivate' : 'Activate'),
-                      ),
-                    ),
                     const PopupMenuItem(
                       value: 'delete',
                       child: ListTile(
@@ -354,25 +334,67 @@ class _ServicesScreenState extends State<ServicesScreen> {
               ],
             ),
             children: [
-              Padding(
+              Container(
                 padding: const EdgeInsets.all(16.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border(
+                    top: BorderSide(color: Colors.black.withValues(alpha: 0.2), width: 1),
+                  ),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'Description:',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                        fontSize: 15,
+                      ),
                     ),
-                    Text(service.description),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
                     Text(
-                      'Prices:',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      service.description,
+                      style: TextStyle(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        fontSize: 14,
+                      ),
                     ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Prices:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     ...service.prices.entries.map((entry) =>
                       Padding(
-                        padding: const EdgeInsets.only(left: 16.0),
-                        child: Text('${entry.key}: ₱${entry.value.toStringAsFixed(2)}'),
+                        padding: const EdgeInsets.only(left: 16.0, bottom: 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                entry.key,
+                                style: TextStyle(
+                                  color: Colors.black.withValues(alpha: 0.7),
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '₱${entry.value.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -382,179 +404,6 @@ class _ServicesScreenState extends State<ServicesScreen> {
           ),
         );
       },
-    );
-  }
-
-  void _showAddServiceDialog() {
-    final codeController = TextEditingController();
-    final nameController = TextEditingController();
-    final categoryController = TextEditingController();
-    final descriptionController = TextEditingController();
-
-    // All possible vehicle types
-    final List<String> allVehicleTypes = [
-      'Cars',
-      'SUV',
-      'Van',
-      'Pick-Up',
-      'Delivery Truck (S)',
-      'Delivery Truck (L)',
-      'Motorcycle (S)',
-      'Motorcycle (L)',
-      'Tricycle',
-    ];
-
-    // Dynamic vehicle prices map
-    Map<String, TextEditingController> vehicleControllers = {};
-    Map<String, bool> selectedVehicleTypes = {};
-
-    // Initialize with basic 4 types selected by default
-    for (String type in allVehicleTypes) {
-      vehicleControllers[type] = TextEditingController();
-      selectedVehicleTypes[type] = ['Cars', 'SUV', 'Van', 'Pick-Up'].contains(type);
-    }
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Add New Service'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: codeController,
-                  decoration: const InputDecoration(labelText: 'Service Code (e.g., EC16)'),
-                ),
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(labelText: 'Service Name'),
-                ),
-                TextField(
-                  controller: categoryController,
-                  decoration: const InputDecoration(labelText: 'Category'),
-                ),
-                TextField(
-                  controller: descriptionController,
-                  decoration: const InputDecoration(labelText: 'Description'),
-                  maxLines: 3,
-                ),
-                const SizedBox(height: 16),
-                const Text('Vehicle Types & Prices:', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                ...allVehicleTypes.map((vehicleType) => Column(
-                  children: [
-                    CheckboxListTile(
-                      dense: true,
-                      title: Text(vehicleType),
-                      value: selectedVehicleTypes[vehicleType],
-                      onChanged: (bool? value) {
-                        setDialogState(() {
-                          selectedVehicleTypes[vehicleType] = value ?? false;
-                        });
-                      },
-                    ),
-                    if (selectedVehicleTypes[vehicleType] == true)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
-                        child: TextField(
-                          controller: vehicleControllers[vehicleType],
-                          decoration: InputDecoration(
-                            labelText: '$vehicleType Price',
-                            prefixText: '₱',
-                          ),
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                  ],
-                )).toList(),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (codeController.text.isNotEmpty &&
-                    nameController.text.isNotEmpty &&
-                    categoryController.text.isNotEmpty &&
-                    descriptionController.text.isNotEmpty) {
-
-                  // Build prices map for selected vehicle types
-                  Map<String, double> prices = {};
-                  bool hasValidPrices = true;
-
-                  for (String vehicleType in allVehicleTypes) {
-                    if (selectedVehicleTypes[vehicleType] == true) {
-                      final priceText = vehicleControllers[vehicleType]!.text;
-                      if (priceText.isEmpty) {
-                        hasValidPrices = false;
-                        break;
-                      }
-                      final price = double.tryParse(priceText);
-                      if (price == null) {
-                        hasValidPrices = false;
-                        break;
-                      }
-                      prices[vehicleType] = price;
-                    }
-                  }
-
-                  if (!hasValidPrices || prices.isEmpty) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Please enter valid prices for selected vehicle types')),
-                      );
-                    }
-                    return;
-                  }
-
-                  try {
-                    final newService = Service(
-                      id: '',
-                      code: codeController.text.trim().toUpperCase(),
-                      name: nameController.text.trim(),
-                      category: categoryController.text.trim(),
-                      description: descriptionController.text.trim(),
-                      prices: prices,
-                      isActive: true,
-                      createdAt: DateTime.now(),
-                      updatedAt: DateTime.now(),
-                    );
-
-                    await ServicesManager.addService(newService);
-                    await _loadData();
-                    if (mounted) Navigator.pop(context);
-
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Service added successfully!')),
-                      );
-                    }
-                  } catch (e) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Error adding service: $e')),
-                      );
-                    }
-                  }
-                } else {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please fill in all required fields')),
-                    );
-                  }
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 

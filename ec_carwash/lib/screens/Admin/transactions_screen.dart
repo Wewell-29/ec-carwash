@@ -74,7 +74,7 @@ class TransactionsScreen extends StatefulWidget {
 class _TransactionsScreenState extends State<TransactionsScreen> {
   List<TransactionData> _transactions = [];
   bool _isLoading = true;
-  String _selectedFilter = 'all'; // all, today, week, month
+  String _selectedFilter = 'today'; // Default to today
   DateTime? _startDate;
   DateTime? _endDate;
 
@@ -133,36 +133,6 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     }
   }
 
-  Future<void> _showDateRangePicker() async {
-    final DateTimeRange? picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now(),
-      initialDateRange: _startDate != null && _endDate != null
-          ? DateTimeRange(start: _startDate!, end: _endDate!)
-          : null,
-    );
-
-    if (picked != null) {
-      setState(() {
-        _startDate = picked.start;
-        _endDate = picked.end;
-        _selectedFilter = 'custom';
-      });
-      _loadTransactions();
-    }
-  }
-
-  Color _getSourceColor(String? source) {
-    switch (source) {
-      case 'booking':
-        return Colors.blue;
-      case 'pos':
-      default:
-        return Colors.green;
-    }
-  }
-
   IconData _getSourceIcon(String? source) {
     switch (source) {
       case 'booking':
@@ -179,106 +149,75 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     final totalTransactions = _transactions.length;
 
     return Scaffold(
-      backgroundColor: Colors.grey.shade100,
+      backgroundColor: Colors.white,
       body: Column(
         children: [
-          // Summary Cards and Filters
+          // Compact Filter Bar
           Container(
             padding: const EdgeInsets.all(16),
-            child: Column(
+            child: Row(
               children: [
-                // Summary Cards
-                Row(
-                  children: [
-                    Expanded(
-                      child: Card(
-                        color: Colors.green,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.payments, color: Colors.white, size: 24),
-                              const SizedBox(height: 8),
-                              Text(
-                                '₱${totalRevenue.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Text(
-                                'Total Revenue',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                            ],
+                // Revenue Display (compact)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.yellow.shade50,
+                    border: Border.all(color: Colors.black87, width: 1.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.payments, color: Colors.black87, size: 20),
+                      const SizedBox(width: 8),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '₱${totalRevenue.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              color: Colors.black87,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Card(
-                        color: Colors.blue,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.receipt_long, color: Colors.white, size: 24),
-                              const SizedBox(height: 8),
-                              Text(
-                                totalTransactions.toString(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Text(
-                                'Transactions',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                            ],
+                          Text(
+                            '$totalTransactions transactions',
+                            style: TextStyle(
+                              color: Colors.black.withValues(alpha: 0.6),
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(width: 16),
                 // Filter buttons
-                Row(
-                  children: [
-                    _buildFilterChip('All', 'all'),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('Today', 'today'),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('Week', 'week'),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('Month', 'month'),
-                    const SizedBox(width: 8),
-                    FilterChip(
-                      label: Text(_selectedFilter == 'custom' && _startDate != null
-                          ? 'Custom Range'
-                          : 'Pick Range'),
-                      selected: _selectedFilter == 'custom',
-                      onSelected: (selected) => _showDateRangePicker(),
-                      selectedColor: Colors.yellow.shade700,
-                      checkmarkColor: Colors.black,
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.refresh),
-                      onPressed: _loadTransactions,
-                    ),
-                  ],
+                _buildFilterChip('Today', 'today'),
+                const SizedBox(width: 8),
+                _buildFilterChip('Week', 'week'),
+                const SizedBox(width: 8),
+                _buildFilterChip('Month', 'month'),
+                const SizedBox(width: 8),
+                _buildFilterChip('All', 'all'),
+                const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: _loadTransactions,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.black87,
+                    backgroundColor: Colors.yellow.shade50,
+                    side: const BorderSide(color: Colors.black87, width: 1.5),
+                  ),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Refresh'),
                 ),
               ],
             ),
           ),
-          // Transactions List
+          // Compact Transactions Table
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -290,11 +229,11 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                         ),
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
                         itemCount: _transactions.length,
                         itemBuilder: (context, index) {
                           final transaction = _transactions[index];
-                          return _buildTransactionCard(transaction);
+                          return _buildCompactTransactionCard(transaction);
                         },
                       ),
           ),
@@ -305,20 +244,29 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
 
   Widget _buildFilterChip(String label, String value) {
     final isSelected = _selectedFilter == value;
-    return FilterChip(
-      label: Text(label),
+    return ChoiceChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isSelected ? Colors.black87 : Colors.black.withValues(alpha: 0.7),
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
       selected: isSelected,
       onSelected: (selected) {
         setState(() => _selectedFilter = value);
         _loadTransactions();
       },
       selectedColor: Colors.yellow.shade700,
-      checkmarkColor: Colors.black,
+      backgroundColor: Colors.grey.shade200,
+      side: BorderSide(
+        color: isSelected ? Colors.black87 : Colors.transparent,
+        width: 1.5,
+      ),
     );
   }
 
-  Widget _buildTransactionCard(TransactionData transaction) {
-    final sourceColor = _getSourceColor(transaction.source);
+  Widget _buildCompactTransactionCard(TransactionData transaction) {
     final sourceIcon = _getSourceIcon(transaction.source);
     final customerName = transaction.customer['name'] ?? 'Unknown Customer';
     final plateNumber = transaction.customer['plateNumber'] ?? 'N/A';
@@ -326,151 +274,224 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      color: Colors.yellow.shade50,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: Colors.black87, width: 1.5),
+      ),
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        childrenPadding: EdgeInsets.zero,
+        leading: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.black87, width: 1),
+          ),
+          child: CircleAvatar(
+            backgroundColor: Colors.yellow.shade700,
+            radius: 22,
+            child: Icon(sourceIcon, color: Colors.black87, size: 24),
+          ),
+        ),
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with source and transaction ID
-            Row(
-              children: [
-                Icon(sourceIcon, color: sourceColor, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  transaction.source?.toUpperCase() ?? 'POS',
-                  style: TextStyle(
-                    color: sourceColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  'TXN #${transaction.id?.substring(0, 8) ?? 'N/A'}',
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // Customer and transaction info
             Row(
               children: [
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        customerName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Plate: $plateNumber',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                      if (transaction.bookingId != null)
-                        Text(
-                          'Booking: ${transaction.bookingId?.substring(0, 8)}',
-                          style: TextStyle(color: Colors.blue.shade600, fontSize: 12),
-                        ),
-                    ],
+                  child: Text(
+                    customerName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                      fontSize: 17,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                Text(
+                  '₱${transaction.total.toStringAsFixed(0)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Plate: $plateNumber',
+                    style: TextStyle(
+                      color: Colors.black.withValues(alpha: 0.7),
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${DateFormat('MMM dd, yyyy').format(transaction.transactionAt)} • $timeFormatted',
+                  style: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.yellow.shade700,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.black87, width: 0.5),
+                  ),
+                  child: Text(
+                    transaction.source?.toUpperCase() ?? 'POS',
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${transaction.items.length} item${transaction.items.length > 1 ? 's' : ''}',
+                  style: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(
+                top: BorderSide(color: Colors.black.withValues(alpha: 0.2), width: 1),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Transaction ID
+                Row(
                   children: [
                     Text(
-                      DateFormat('MMM dd, yyyy').format(transaction.transactionAt),
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    Text(
-                      timeFormatted,
+                      'TXN #${transaction.id?.substring(0, 12) ?? 'N/A'}',
                       style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontWeight: FontWeight.w500,
+                        color: Colors.black.withValues(alpha: 0.6),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.yellow.shade700,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.black87, width: 0.5),
+                      ),
+                      child: Text(
+                        transaction.source?.toUpperCase() ?? 'POS',
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Items
+                const Text(
+                  'Services:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...transaction.items.map((item) {
+                  final code = item['serviceCode'] ?? 'N/A';
+                  final vehicleType = item['vehicleType'] ?? 'N/A';
+                  final quantity = item['quantity'] ?? 1;
+                  final subtotal = (item['subtotal'] ?? 0).toDouble();
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '• $code ($vehicleType) x$quantity',
+                            style: TextStyle(
+                              color: Colors.black.withValues(alpha: 0.7),
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '₱${subtotal.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+                const Divider(height: 24),
+                // Total Amount Paid
+                Row(
+                  children: [
+                    const Text(
+                      'Total Amount Paid:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.yellow.shade700,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.black87, width: 1.5),
+                      ),
+                      child: Text(
+                        '₱${transaction.total.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 19,
+                          color: Colors.black87,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            // Items
-            const Text(
-              'Items:',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 4),
-            ...transaction.items.map((item) {
-              final code = item['serviceCode'] ?? 'N/A';
-              final vehicleType = item['vehicleType'] ?? 'N/A';
-              final quantity = item['quantity'] ?? 1;
-              final subtotal = (item['subtotal'] ?? 0).toDouble();
-
-              return Padding(
-                padding: const EdgeInsets.only(left: 8, bottom: 2),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text('• $code ($vehicleType) x$quantity'),
-                    ),
-                    Text(
-                      '₱${subtotal.toStringAsFixed(0)}',
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                  ],
-                ),
-              );
-            }),
-            const SizedBox(height: 8),
-            // Payment details
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade200),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      const Text('Total:', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const Spacer(),
-                      Text(
-                        '₱${transaction.total.toStringAsFixed(2)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      const Text('Cash:'),
-                      const Spacer(),
-                      Text('₱${transaction.cash.toStringAsFixed(2)}'),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      const Text('Change:'),
-                      const Spacer(),
-                      Text('₱${transaction.change.toStringAsFixed(2)}'),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+
 }

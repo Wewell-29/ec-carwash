@@ -2018,7 +2018,7 @@ class _POSScreenState extends State<POSScreen> {
         "transactionAt": Timestamp.fromDate(txnDateTime),
         "status": "paid",
         "assignedTeam": assignedTeam ?? "Unassigned",
-        "teamCommission": assignedTeam != null ? (totalAmount * 0.35) : 0.0, // 35% commission
+        "teamCommission": 0.0, // Commission added only when booking is marked completed
         "createdAt": FieldValue.serverTimestamp(),
       };
 
@@ -2082,10 +2082,11 @@ class _POSScreenState extends State<POSScreen> {
         "total": totalAmount,
 
         "status": "approved",
+        "paymentStatus": "paid", // POS transactions are already paid
         "source": "pos",
         "transactionId": transactionId,
         "assignedTeam": assignedTeam ?? "Unassigned",
-        "teamCommission": assignedTeam != null ? (totalAmount * 0.35) : 0.0, // 35% commission
+        "teamCommission": 0.0, // Commission added only when booking is marked completed
 
         "createdAt": FieldValue.serverTimestamp(),
       };

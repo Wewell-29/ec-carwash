@@ -221,9 +221,66 @@ List<InventoryItem> inventoryData = [
   ),
 ];
 
+class InventoryLog {
+  final String? id;
+  final String itemId;
+  final String itemName;
+  final int quantity;
+  final String staffName;
+  final String action; // 'withdraw', 'add', 'adjust'
+  final String? notes;
+  final DateTime timestamp;
+  final int stockBefore;
+  final int stockAfter;
+
+  InventoryLog({
+    this.id,
+    required this.itemId,
+    required this.itemName,
+    required this.quantity,
+    required this.staffName,
+    required this.action,
+    this.notes,
+    required this.timestamp,
+    required this.stockBefore,
+    required this.stockAfter,
+  });
+
+  Map<String, dynamic> toFirestore() {
+    return {
+      'itemId': itemId,
+      'itemName': itemName,
+      'quantity': quantity,
+      'staffName': staffName,
+      'action': action,
+      'notes': notes,
+      'timestamp': Timestamp.fromDate(timestamp),
+      'stockBefore': stockBefore,
+      'stockAfter': stockAfter,
+    };
+  }
+
+  factory InventoryLog.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return InventoryLog(
+      id: doc.id,
+      itemId: data['itemId'],
+      itemName: data['itemName'],
+      quantity: data['quantity'],
+      staffName: data['staffName'],
+      action: data['action'],
+      notes: data['notes'],
+      timestamp: (data['timestamp'] as Timestamp).toDate(),
+      stockBefore: data['stockBefore'],
+      stockAfter: data['stockAfter'],
+    );
+  }
+}
+
 class InventoryManager {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String _collection = 'inventory';
+  static const String _logsCollection = 'inventory_logs';
 
   static Stream<List<InventoryItem>> getItemsStream() {
     return _firestore
@@ -295,6 +352,100 @@ class InventoryManager {
       for (final item in inventoryData) {
         await addItem(item);
       }
+    }
+  }
+
+  // Inventory Log Methods
+  static Future<void> addLog(InventoryLog log) async {
+    await _firestore.collection(_logsCollection).add(log.toFirestore());
+  }
+
+  static Future<List<InventoryLog>> getLogs({String? itemId, int? limit}) async {
+    Query query = _firestore.collection(_logsCollection).orderBy('timestamp', descending: true);
+
+    if (itemId != null) {
+      query = query.where('itemId', isEqualTo: itemId);
+    }
+
+    if (limit != null) {
+      query = query.limit(limit);
+    }
+
+    final snapshot = await query.get();
+    return snapshot.docs.map((doc) => InventoryLog.fromFirestore(doc)).toList();
+  }
+
+  static Future<void> withdrawStock(String itemId, int quantity, String staffName, String? notes) async {
+    final item = await getItem(itemId);
+    if (item != null && item.currentStock >= quantity) {
+      final newStock = item.currentStock - quantity;
+
+      // Create log entry
+      final log = InventoryLog(
+        itemId: itemId,
+        itemName: item.name,
+        quantity: quantity,
+        staffName: staffName,
+        action: 'withdraw',
+        notes: notes,
+        timestamp: DateTime.now(),
+        stockBefore: item.currentStock,
+        stockAfter: newStock,
+      );
+
+      // Update stock and add log
+      await updateStock(itemId, newStock);
+      await addLog(log);
+    } else {
+      throw Exception('Insufficient stock');
+    }
+  }
+
+  static Future<void> addStockWithLog(String itemId, int quantity, String staffName, String? notes) async {
+    final item = await getItem(itemId);
+    if (item != null) {
+      final newStock = item.currentStock + quantity;
+
+      // Create log entry
+      final log = InventoryLog(
+        itemId: itemId,
+        itemName: item.name,
+        quantity: quantity,
+        staffName: staffName,
+        action: 'add',
+        notes: notes,
+        timestamp: DateTime.now(),
+        stockBefore: item.currentStock,
+        stockAfter: newStock,
+      );
+
+      // Update stock and add log
+      await updateStock(itemId, newStock);
+      await addLog(log);
+    }
+  }
+
+  static Future<void> adjustStockWithLog(String itemId, int newStock, String staffName, String? notes) async {
+    final item = await getItem(itemId);
+    if (item != null) {
+      final quantity = (newStock - item.currentStock).abs();
+
+      // Create log entry
+      final log = InventoryLog(
+        itemId: itemId,
+        itemName: item.name,
+        quantity: quantity,
+        staffName: staffName,
+        action: 'adjust',
+        notes: notes,
+        timestamp: DateTime.now(),
+        stockBefore: item.currentStock,
+        stockAfter: newStock,
+      );
+
+      // Update stock and add log
+      await updateStock(itemId, newStock);
+      await addLog(log);
     }
   }
 }

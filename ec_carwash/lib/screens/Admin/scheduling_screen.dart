@@ -16,7 +16,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
   List<Booking> _completedBookings = [];
   List<Booking> _cancelledBookings = [];
   bool _isLoading = true;
-  String _selectedFilter = 'all'; // all, today
+  String _selectedFilter = 'today'; // all, today
 
   @override
   void initState() {
@@ -277,9 +277,22 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       // Update booking status
       await BookingManager.updateBookingStatus(bookingId, status);
 
-      // If marking as completed, create a transaction record
+      // If marking as completed, add commission
       if (status == 'completed') {
-        await _createTransactionFromBooking(booking);
+        // Calculate and add team commission (35%)
+        final commission = booking.assignedTeam != null && booking.assignedTeam!.isNotEmpty
+            ? booking.totalAmount * 0.35
+            : 0.0;
+
+        await FirebaseFirestore.instance
+            .collection('Bookings')
+            .doc(bookingId)
+            .update({'teamCommission': commission});
+
+        // Only create transaction if this is NOT a POS booking (POS already created one)
+        if (booking.source != 'pos') {
+          await _createTransactionFromBooking(booking);
+        }
       }
 
       await _loadBookings(); // Refresh the list

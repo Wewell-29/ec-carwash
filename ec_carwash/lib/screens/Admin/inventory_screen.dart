@@ -89,9 +89,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     return Column(
         children: [
-          _buildQuickActions(lowStockCount),
-          _buildFilters(categories, isWide),
-          _buildSummaryCards(isWide),
+          _buildFilters(categories, isWide, lowStockCount),
           Expanded(
             child: _buildInventoryList(isWide),
           ),
@@ -99,51 +97,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       );
   }
 
-  Widget _buildQuickActions(int lowStockCount) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () => _showAddItemDialog(),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.yellow.shade700,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                elevation: 3,
-              ),
-              icon: const Icon(Icons.add, weight: 600),
-              label: const Text('Add New Item', style: TextStyle(fontWeight: FontWeight.w600)),
-            ),
-          ),
-          const SizedBox(width: 12),
-          if (lowStockCount > 0)
-            ElevatedButton.icon(
-              onPressed: () => _showLowStockAlert(),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange.shade600,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              icon: Badge(
-                label: Text('$lowStockCount'),
-                child: const Icon(Icons.warning),
-              ),
-              label: const Text('Low Stock'),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilters(List<String> categories, bool isWide) {
+  Widget _buildFilters(List<String> categories, bool isWide, int lowStockCount) {
     return Container(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -153,10 +107,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
               Expanded(
                 child: TextField(
                   controller: _searchController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Search items...',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.search),
+                    border: const OutlineInputBorder(),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                          )
+                        : null,
                   ),
                   onChanged: (value) {
                     setState(() {
@@ -165,99 +128,63 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   },
                 ),
               ),
-              const SizedBox(width: 16),
-              DropdownButton<String>(
-                value: _selectedCategory,
-                hint: const Text('Category'),
-                onChanged: (value) {
-                  setState(() {
-                    _selectedCategory = value!;
-                  });
-                },
-                items: categories.map((category) {
-                  return DropdownMenuItem(
-                    value: category,
-                    child: Text(category),
-                  );
-                }).toList(),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: DropdownButton<String>(
+                  value: _selectedCategory,
+                  underline: const SizedBox(),
+                  hint: const Text('Category'),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedCategory = value!;
+                    });
+                  },
+                  items: categories.map((category) {
+                    return DropdownMenuItem(
+                      value: category,
+                      child: Text(category),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(width: 12),
+              if (lowStockCount > 0)
+                ElevatedButton.icon(
+                  onPressed: () => _showLowStockAlert(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.yellow.shade700,
+                    foregroundColor: Colors.black87,
+                    side: const BorderSide(color: Colors.black87, width: 1.5),
+                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                    elevation: 2,
+                  ),
+                  icon: Badge(
+                    label: Text('$lowStockCount', style: const TextStyle(fontSize: 11)),
+                    backgroundColor: Colors.black87,
+                    child: const Icon(Icons.warning),
+                  ),
+                  label: const Text('Low Stock', style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              const SizedBox(width: 12),
+              OutlinedButton.icon(
+                onPressed: () => _showLogHistory(),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.black87,
+                  backgroundColor: Colors.yellow.shade50,
+                  side: const BorderSide(color: Colors.black87, width: 1.5),
+                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                ),
+                icon: const Icon(Icons.history),
+                label: const Text('History', style: TextStyle(fontWeight: FontWeight.w600)),
               ),
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSummaryCards(bool isWide) {
-    final totalItems = _allItems.length;
-    final lowStockItems = _allItems.where((item) => item.isLowStock).length;
-    final totalValue = _allItems.fold<double>(
-      0.0,
-      (sum, item) => sum + (item.currentStock * item.unitPrice),
-    );
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildSummaryCard(
-              'Total Items',
-              totalItems.toString(),
-              Icons.inventory,
-              Colors.grey.shade700,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _buildSummaryCard(
-              'Low Stock',
-              lowStockItems.toString(),
-              Icons.warning,
-              Colors.orange.shade700,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _buildSummaryCard(
-              'Total Value',
-              '₱${totalValue.toStringAsFixed(0)}',
-              Icons.attach_money,
-              Colors.yellow.shade700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSummaryCard(String title, String value, IconData icon, Color color) {
-    return Card(
-      color: color,
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          children: [
-            Icon(icon, color: Colors.white, size: 24),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Colors.white70,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -277,30 +204,87 @@ class _InventoryScreenState extends State<InventoryScreen> {
       itemBuilder: (context, index) {
         final item = items[index];
         return Card(
-          margin: const EdgeInsets.only(bottom: 8),
+          margin: const EdgeInsets.only(bottom: 12),
+          color: Colors.yellow.shade50,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: const BorderSide(color: Colors.black87, width: 1.5),
+          ),
+          elevation: 2,
           child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: item.isLowStock ? Colors.red : Colors.green,
-              child: Icon(
-                item.isLowStock ? Icons.warning : Icons.check,
-                color: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.black87, width: 1),
+              ),
+              child: CircleAvatar(
+                backgroundColor: item.isLowStock ? Colors.yellow.shade700 : Colors.yellow.shade100,
+                child: Icon(
+                  item.isLowStock ? Icons.warning : Icons.check_circle,
+                  color: Colors.black87,
+                ),
               ),
             ),
             title: Text(
               item.name,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+                fontSize: 17,
+              ),
             ),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Category: ${item.category}'),
-                Text('Stock: ${item.currentStock} ${item.unit}'),
+                const SizedBox(height: 6),
+                Text(
+                  'Category: ${item.category}',
+                  style: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 15),
+                    children: [
+                      TextSpan(
+                        text: 'Stock: ',
+                        style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                      ),
+                      TextSpan(
+                        text: '${item.currentStock}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                          fontSize: 16,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' ${item.unit}',
+                        style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                      ),
+                    ],
+                  ),
+                ),
                 if (item.isLowStock)
-                  Text(
-                    'LOW STOCK! (Min: ${item.minStock})',
-                    style: const TextStyle(
-                      color: Colors.red,
-                      fontWeight: FontWeight.bold,
+                  Container(
+                    margin: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.yellow.shade700,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.black87, width: 1),
+                    ),
+                    child: Text(
+                      'LOW STOCK! (Min: ${item.minStock})',
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
               ],
@@ -308,19 +292,21 @@ class _InventoryScreenState extends State<InventoryScreen> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '₱${item.unitPrice.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    Text('per ${item.unit}'),
-                  ],
+                // Eye-catching Withdraw button
+                ElevatedButton.icon(
+                  onPressed: () => _showWithdrawStockDialog(item),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.yellow.shade700,
+                    foregroundColor: Colors.black87,
+                    side: const BorderSide(color: Colors.black87, width: 1.5),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    elevation: 3,
+                  ),
+                  icon: const Icon(Icons.remove_circle_outline, size: 20),
+                  label: const Text(
+                    'Withdraw',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 PopupMenuButton<String>(
@@ -331,6 +317,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         break;
                       case 'adjust':
                         _showAdjustStockDialog(item);
+                        break;
+                      case 'history':
+                        _showItemHistory(item);
                         break;
                       case 'delete':
                         _showDeleteConfirmation(item);
@@ -350,6 +339,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       child: ListTile(
                         leading: Icon(Icons.tune),
                         title: Text('Adjust Stock'),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'history',
+                      child: ListTile(
+                        leading: Icon(Icons.history),
+                        title: Text('View History'),
                       ),
                     ),
                     const PopupMenuItem(
@@ -392,122 +388,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAddItemDialog() {
-    final nameController = TextEditingController();
-    final categoryController = TextEditingController();
-    final stockController = TextEditingController();
-    final minStockController = TextEditingController();
-    final priceController = TextEditingController();
-    final unitController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add New Item'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: 'Item Name'),
-              ),
-              TextField(
-                controller: categoryController,
-                decoration: const InputDecoration(labelText: 'Category'),
-              ),
-              TextField(
-                controller: stockController,
-                decoration: const InputDecoration(labelText: 'Current Stock'),
-                keyboardType: TextInputType.number,
-              ),
-              TextField(
-                controller: minStockController,
-                decoration: const InputDecoration(labelText: 'Minimum Stock'),
-                keyboardType: TextInputType.number,
-              ),
-              TextField(
-                controller: priceController,
-                decoration: const InputDecoration(labelText: 'Unit Price'),
-                keyboardType: TextInputType.number,
-              ),
-              TextField(
-                controller: unitController,
-                decoration: const InputDecoration(labelText: 'Unit (e.g., bottles, pieces)'),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (nameController.text.isNotEmpty &&
-                  categoryController.text.isNotEmpty &&
-                  stockController.text.isNotEmpty &&
-                  minStockController.text.isNotEmpty &&
-                  priceController.text.isNotEmpty &&
-                  unitController.text.isNotEmpty) {
-
-                try {
-                  final currentStock = int.tryParse(stockController.text);
-                  final minStock = int.tryParse(minStockController.text);
-                  final unitPrice = double.tryParse(priceController.text);
-
-                  if (currentStock == null || minStock == null || unitPrice == null) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Please enter valid numbers for stock and price')),
-                      );
-                    }
-                    return;
-                  }
-
-                  final newItem = InventoryItem(
-                    id: '',
-                    name: nameController.text.trim(),
-                    category: categoryController.text.trim(),
-                    currentStock: currentStock,
-                    minStock: minStock,
-                    unitPrice: unitPrice,
-                    unit: unitController.text.trim(),
-                    lastUpdated: DateTime.now(),
-                  );
-
-                  await InventoryManager.addItem(newItem);
-                  await _loadData();
-                  if (mounted) Navigator.pop(context);
-
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Item added successfully!')),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error adding item: $e')),
-                    );
-                  }
-                }
-              } else {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please fill in all fields')),
-                  );
-                }
-              }
-            },
-            child: const Text('Add'),
           ),
         ],
       ),
@@ -667,6 +547,389 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _showWithdrawStockDialog(InventoryItem item) {
+    final quantityController = TextEditingController();
+    final staffNameController = TextEditingController();
+    final notesController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Withdraw Stock - ${item.name}'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Available Stock: ${item.currentStock} ${item.unit}'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: quantityController,
+                decoration: const InputDecoration(
+                  labelText: 'Quantity to Withdraw',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: staffNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Staff Name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: notesController,
+                decoration: const InputDecoration(
+                  labelText: 'Notes (Optional)',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final quantity = int.tryParse(quantityController.text);
+              final staffName = staffNameController.text.trim();
+
+              if (quantity == null || quantity <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid quantity')),
+                );
+                return;
+              }
+
+              if (staffName.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter staff name')),
+                );
+                return;
+              }
+
+              if (quantity > item.currentStock) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Insufficient stock')),
+                );
+                return;
+              }
+
+              try {
+                await InventoryManager.withdrawStock(
+                  item.id,
+                  quantity,
+                  staffName,
+                  notesController.text.trim().isEmpty ? null : notesController.text.trim(),
+                );
+                await _loadData();
+                if (mounted) Navigator.pop(context);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Stock withdrawn successfully!')),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error withdrawing stock: $e')),
+                  );
+                }
+              }
+            },
+            child: const Text('Withdraw'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showItemHistory(InventoryItem item) async {
+    try {
+      final logs = await InventoryManager.getLogs(itemId: item.id, limit: 50);
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('History - ${item.name}'),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 400,
+            child: logs.isEmpty
+                ? const Center(child: Text('No history found'))
+                : ListView.builder(
+                    itemCount: logs.length,
+                    itemBuilder: (context, index) {
+                      final log = logs[index];
+                      final isWithdraw = log.action == 'withdraw';
+                      final isAdd = log.action == 'add';
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        color: Colors.yellow.shade50,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: const BorderSide(color: Colors.black87, width: 1.5),
+                        ),
+                        child: ListTile(
+                          leading: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.black87, width: 1),
+                            ),
+                            child: CircleAvatar(
+                              backgroundColor: isWithdraw
+                                  ? Colors.yellow.shade700
+                                  : isAdd
+                                      ? Colors.yellow.shade200
+                                      : Colors.yellow.shade400,
+                              child: Icon(
+                                isWithdraw ? Icons.remove_circle : Icons.add_circle,
+                                color: Colors.black87,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            '${log.action.toUpperCase()} - ${log.quantity} ${item.unit}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 2),
+                              Text(
+                                'Staff: ${log.staffName}',
+                                style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                              ),
+                              Text(
+                                '${log.stockBefore} → ${log.stockAfter} ${item.unit}',
+                                style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                              ),
+                              if (log.notes != null && log.notes!.isNotEmpty)
+                                Text(
+                                  'Notes: ${log.notes}',
+                                  style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                                ),
+                              Text(
+                                log.timestamp.toString().substring(0, 16),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.black.withValues(alpha: 0.5),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading history: $e')),
+        );
+      }
+    }
+  }
+
+  void _showLogHistory() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const InventoryLogHistoryScreen(),
+      ),
+    );
+  }
+}
+
+// Separate screen for full log history
+class InventoryLogHistoryScreen extends StatefulWidget {
+  const InventoryLogHistoryScreen({super.key});
+
+  @override
+  State<InventoryLogHistoryScreen> createState() => _InventoryLogHistoryScreenState();
+}
+
+class _InventoryLogHistoryScreenState extends State<InventoryLogHistoryScreen> {
+  List<InventoryLog> _logs = [];
+  bool _isLoading = true;
+  String _filterAction = 'all';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLogs();
+  }
+
+  Future<void> _loadLogs() async {
+    setState(() => _isLoading = true);
+    try {
+      final logs = await InventoryManager.getLogs(limit: 200);
+      setState(() {
+        _logs = logs;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading logs: $e')),
+        );
+      }
+    }
+  }
+
+  List<InventoryLog> get _filteredLogs {
+    if (_filterAction == 'all') return _logs;
+    return _logs.where((log) => log.action == _filterAction).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Inventory Log History'),
+        backgroundColor: Colors.black87,
+        foregroundColor: Colors.yellow.shade700,
+        actions: [
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            child: PopupMenuButton<String>(
+              icon: Icon(Icons.filter_list, color: Colors.yellow.shade700),
+              tooltip: 'Filter by action',
+              onSelected: (value) {
+                setState(() => _filterAction = value);
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: 'all', child: Text('All Actions')),
+                const PopupMenuItem(value: 'withdraw', child: Text('Withdrawals')),
+                const PopupMenuItem(value: 'add', child: Text('Additions')),
+                const PopupMenuItem(value: 'adjust', child: Text('Adjustments')),
+              ],
+            ),
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _filteredLogs.isEmpty
+              ? const Center(child: Text('No logs found'))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _filteredLogs.length,
+                  itemBuilder: (context, index) {
+                    final log = _filteredLogs[index];
+                    final isWithdraw = log.action == 'withdraw';
+                    final isAdd = log.action == 'add';
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      color: Colors.yellow.shade50,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: const BorderSide(color: Colors.black87, width: 1.5),
+                      ),
+                      elevation: 2,
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        leading: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.black87, width: 1),
+                          ),
+                          child: CircleAvatar(
+                            backgroundColor: isWithdraw
+                                ? Colors.yellow.shade700
+                                : isAdd
+                                    ? Colors.yellow.shade200
+                                    : Colors.yellow.shade400,
+                            child: Icon(
+                              isWithdraw
+                                  ? Icons.remove_circle
+                                  : isAdd
+                                      ? Icons.add_circle
+                                      : Icons.tune,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          log.itemName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isWithdraw ? Colors.yellow.shade700 : Colors.yellow.shade200,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.black87, width: 0.5),
+                              ),
+                              child: Text(
+                                '${log.action.toUpperCase()}: ${log.quantity} units',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Staff: ${log.staffName}',
+                              style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                            ),
+                            Text(
+                              '${log.stockBefore} → ${log.stockAfter}',
+                              style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                            ),
+                            if (log.notes != null && log.notes!.isNotEmpty)
+                              Text(
+                                'Notes: ${log.notes}',
+                                style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                              ),
+                            Text(
+                              log.timestamp.toString().substring(0, 16),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black.withValues(alpha: 0.5),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
     );
   }
 }
