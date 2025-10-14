@@ -111,9 +111,10 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       List<Map<String, dynamic>> pendingBookings = [];
       for (final doc in bookingsSnapshot.docs) {
         final data = doc.data();
-        // Try both scheduledDate (from customer app) and selectedDateTime (from POS)
-        final scheduledDate = (data['scheduledDate'] as Timestamp?)?.toDate() ??
-                             (data['selectedDateTime'] as Timestamp?)?.toDate();
+        // Use unified scheduledDateTime field (with fallback for legacy data)
+        final scheduledDate = (data['scheduledDateTime'] as Timestamp?)?.toDate() ??
+                             (data['selectedDateTime'] as Timestamp?)?.toDate() ??
+                             (data['scheduledDate'] as Timestamp?)?.toDate();
 
         // Only include today's bookings
         if (scheduledDate != null &&

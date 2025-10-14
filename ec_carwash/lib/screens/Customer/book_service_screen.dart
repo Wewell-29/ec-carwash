@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:ec_carwash/data_models/products_data.dart';
+import 'package:ec_carwash/data_models/services_data.dart';
+import 'package:ec_carwash/data_models/booking_data_unified.dart';
+import 'package:ec_carwash/data_models/relationship_manager.dart';
 import 'cart_item.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'customer_home.dart';
 import 'booking_history.dart';
 
@@ -19,6 +20,10 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   TimeOfDay? _selectedTime;
   bool _isLoading = false;
 
+  // Services from Firestore
+  List<Service> _services = [];
+  bool _isLoadingServices = true;
+
   final TextEditingController _plateController = TextEditingController();
   final TextEditingController _contactController = TextEditingController();
 
@@ -26,10 +31,45 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
 
   // --- lifecycle ---
   @override
+  void initState() {
+    super.initState();
+    _loadServices();
+  }
+
+  @override
   void dispose() {
     _plateController.dispose();
     _contactController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadServices() async {
+    try {
+      final services = await ServicesManager.getServices();
+      setState(() {
+        _services = services;
+        _isLoadingServices = false;
+      });
+    } catch (e) {
+      setState(() => _isLoadingServices = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading services: $e')),
+        );
+      }
+    }
+  }
+
+  // Helper to get services data in the old format for compatibility
+  Map<String, Map<String, dynamic>> get productsData {
+    final Map<String, Map<String, dynamic>> data = {};
+    for (final service in _services) {
+      data[service.code] = {
+        'name': service.name,
+        'prices': service.prices,
+      };
+    }
+    return data;
   }
 
   // --- CART FUNCTIONS ---
@@ -82,7 +122,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     );
   }
 
-  // --- SUBMIT BOOKING ---
+  // --- SUBMIT BOOKING (UNIFIED) ---
   Future<void> _submitBooking() async {
     if (_cart.isEmpty ||
         _selectedDate == null ||
@@ -115,68 +155,29 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
       final plateNumber = _plateController.text.trim();
       final contactNumber = _contactController.text.trim();
       final selectedDateTime = _combinedSelectedDateTime()!;
+      final vehicleType = _cart.isNotEmpty ? _cart.first.vehicleType : null;
 
-      final bookingData = {
-        "userId": user.uid,
-        "userEmail": user.email,
-        "userName": user.displayName ?? "",
-        "plateNumber": plateNumber,
-        "contactNumber": contactNumber,
-        // store Firestore Timestamp for robust typing
-        "selectedDateTime": Timestamp.fromDate(selectedDateTime),
-        // still keep readable strings for convenience
-        "date": selectedDateTime.toIso8601String(),
-        "time": TimeOfDay(
-          hour: selectedDateTime.hour,
-          minute: selectedDateTime.minute,
-        ).format(context),
-        "services": _cart
-            .map(
-              (item) => {
-                "serviceCode": item.serviceKey,
-                "serviceName": item.serviceName,
-                "vehicleType": item.vehicleType,
-                "price": item.price,
-              },
-            )
-            .toList(),
-        "status": "pending", // Default status for customer bookings
-        "createdAt": FieldValue.serverTimestamp(),
-      };
+      // Convert cart to BookingService list
+      final services = _cart.map((item) => BookingService(
+        serviceCode: item.serviceKey,
+        serviceName: item.serviceName,
+        vehicleType: item.vehicleType,
+        price: item.price.toDouble(),
+        quantity: 1,
+      )).toList();
 
-      // Save booking
-      await FirebaseFirestore.instance.collection("Bookings").add(bookingData);
-
-      // Save/update Customers collection
-      final vehicleType = _cart.isNotEmpty ? _cart.first.vehicleType : "";
-      final customerRef = FirebaseFirestore.instance.collection("Customers");
-      final existing = await customerRef
-          .where("plateNumber", isEqualTo: plateNumber)
-          .limit(1)
-          .get();
-
-      if (existing.docs.isEmpty) {
-        // New customer record
-        await customerRef.add({
-          "email": user.email,
-          "name": user.displayName ?? "",
-          "plateNumber": plateNumber,
-          "contactNumber": contactNumber,
-          "vehicleType": vehicleType,
-          "createdAt": FieldValue.serverTimestamp(),
-        });
-      } else {
-        // Keep stored vehicleType consistent (do NOT overwrite)
-        final doc = existing.docs.first;
-        final storedVehicle = (doc.data())["vehicleType"] ?? vehicleType;
-        await customerRef.doc(doc.id).update({
-          "email": user.email,
-          "name": user.displayName ?? "",
-          "plateNumber": plateNumber,
-          "contactNumber": contactNumber,
-          "vehicleType": storedVehicle,
-        });
-      }
+      // Use unified system - one call does everything!
+      final (bookingId, customerId) = await RelationshipManager.createBookingWithCustomer(
+        userName: user.displayName ?? 'Customer',
+        userEmail: user.email!,
+        userId: user.uid,
+        plateNumber: plateNumber,
+        contactNumber: contactNumber,
+        vehicleType: vehicleType,
+        scheduledDateTime: selectedDateTime,
+        services: services,
+        source: 'customer-app',
+      );
 
       // reset UI
       setState(() {
@@ -191,14 +192,24 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
       // close sheet if open and give confirmation
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Booking saved successfully")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Booking created successfully! (ID: ${bookingId.substring(0, 8)}...)"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Error saving booking: $e")));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error creating booking: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -356,7 +367,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                 if (_isLoading)
                   Positioned.fill(
                     child: Container(
-                      color: Colors.black.withOpacity(0.45),
+                      color: Colors.black.withValues(alpha: 0.45),
                       child: const Center(
                         child: CircularProgressIndicator(color: Colors.white),
                       ),
@@ -396,6 +407,18 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Show loading indicator while services are loading
+    if (_isLoadingServices) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text("Book a Service"),
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     // Build list of vehicle types from productsData
     final vehicleTypes = <String>{};
     for (var entry in productsData.entries) {
@@ -507,6 +530,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                     onAddToCart: _addToCart,
                     cart: _cart,
                     showCart: _showCart,
+                    productsData: productsData,
                   ),
                 ),
               );
@@ -541,17 +565,27 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   // map vehicle type strings to suitable icons (robust substring checks)
   IconData _getVehicleIcon(String type) {
     final t = type.toLowerCase();
-    if (t.contains('suv'))
+    if (t.contains('suv')) {
       return Icons.directions_car_filled; // on modern Flutter
-    if (t.contains('pick') || t.contains('pickup'))
+    }
+    if (t.contains('pick') || t.contains('pickup')) {
       return Icons.fire_truck; // pickup-like
-    if (t.contains('truck') || t.contains('delivery'))
+    }
+    if (t.contains('truck') || t.contains('delivery')) {
       return Icons.local_shipping;
-    if (t.contains('van')) return Icons.airport_shuttle;
-    if (t.contains('motor') || t.contains('bike')) return Icons.motorcycle;
-    if (t.contains('tricycle') || t.contains('trike'))
+    }
+    if (t.contains('van')) {
+      return Icons.airport_shuttle;
+    }
+    if (t.contains('motor') || t.contains('bike')) {
+      return Icons.motorcycle;
+    }
+    if (t.contains('tricycle') || t.contains('trike')) {
       return Icons.electric_bike;
-    if (t.contains('car') || t.contains('sedan')) return Icons.directions_car;
+    }
+    if (t.contains('car') || t.contains('sedan')) {
+      return Icons.directions_car;
+    }
     return Icons.directions_car;
   }
 }
@@ -562,6 +596,7 @@ class VehicleServicesScreen extends StatefulWidget {
   final Function(String, String, int) onAddToCart;
   final List<CartItem> cart;
   final VoidCallback showCart;
+  final Map<String, Map<String, dynamic>> productsData;
 
   const VehicleServicesScreen({
     super.key,
@@ -569,6 +604,7 @@ class VehicleServicesScreen extends StatefulWidget {
     required this.onAddToCart,
     required this.cart,
     required this.showCart,
+    required this.productsData,
   });
 
   @override
@@ -586,7 +622,7 @@ class _VehicleServicesScreenState extends State<VehicleServicesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredServices = productsData.entries.where((entry) {
+    final filteredServices = widget.productsData.entries.where((entry) {
       final prices = entry.value['prices'] as Map<String, dynamic>;
       return prices.containsKey(widget.vehicleType) &&
           _matchesFilter(entry.key);

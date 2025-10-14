@@ -36,48 +36,22 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
     }
   }
 
-  String _formatDateTime(dynamic rawDate, dynamic rawTime) {
+  String _formatDateTime(dynamic rawScheduledDateTime) {
     try {
-      if (rawDate == null) return "N/A";
+      if (rawScheduledDateTime == null) return "N/A";
+
       DateTime dt;
-
-      if (rawDate is Timestamp) {
-        dt = rawDate.toDate();
-      } else if (rawDate is DateTime) {
-        dt = rawDate;
+      if (rawScheduledDateTime is Timestamp) {
+        dt = rawScheduledDateTime.toDate();
+      } else if (rawScheduledDateTime is DateTime) {
+        dt = rawScheduledDateTime;
       } else {
-        dt = DateTime.tryParse(rawDate.toString()) ?? DateTime.now();
-      }
-
-      if (rawTime != null && rawTime.toString().isNotEmpty) {
-        // supports either "14:30" or maps like {hour: 14, minute: 30, formatted: "..."}
-        if (rawTime is Map &&
-            rawTime['hour'] != null &&
-            rawTime['minute'] != null) {
-          dt = DateTime(
-            dt.year,
-            dt.month,
-            dt.day,
-            rawTime['hour'],
-            rawTime['minute'],
-          );
-        } else {
-          final parts = rawTime.toString().split(':');
-          if (parts.length >= 2) {
-            dt = DateTime(
-              dt.year,
-              dt.month,
-              dt.day,
-              int.tryParse(parts[0]) ?? dt.hour,
-              int.tryParse(parts[1]) ?? dt.minute,
-            );
-          }
-        }
+        dt = DateTime.tryParse(rawScheduledDateTime.toString()) ?? DateTime.now();
       }
 
       return DateFormat('MMM dd, yyyy – hh:mm a').format(dt);
     } catch (_) {
-      return rawDate.toString();
+      return rawScheduledDateTime.toString();
     }
   }
 
@@ -191,9 +165,9 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
             final customer = (data['customer'] as Map<String, dynamic>?) ?? {};
             final plate = (customer['plateNumber'] ?? 'N/A').toString();
 
-            final date = data['transactionAt'] ?? data['createdAt'];
-            final time = data['time']; // may be {hour, minute, formatted}
-            final formattedDateTime = _formatDateTime(date, time);
+            // Use unified datetime field (transactionAt is the timestamp)
+            final scheduledDateTime = data['transactionAt'] ?? data['createdAt'];
+            final formattedDateTime = _formatDateTime(scheduledDateTime);
 
             // Prefer new schema `services`, fallback to old `items`
             final rawList =
@@ -279,9 +253,11 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
             final data = docs[i].data() as Map<String, dynamic>;
             final plate = (data['plateNumber'] ?? 'N/A').toString();
 
-            final date = data['selectedDateTime'] ?? data['date'];
-            final time = data['time'];
-            final formattedDateTime = _formatDateTime(date, time);
+            // Use unified datetime field (with fallback for legacy data)
+            final scheduledDateTime = data['scheduledDateTime'] ??
+                                     data['selectedDateTime'] ??
+                                     data['date'];
+            final formattedDateTime = _formatDateTime(scheduledDateTime);
 
             final services = (data['services'] as List<dynamic>? ?? [])
                 .cast<Map<String, dynamic>>();

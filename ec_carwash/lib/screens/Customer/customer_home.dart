@@ -31,34 +31,22 @@ class _CustomerHomeState extends State<CustomerHome> {
     }
   }
 
-  String _formatDateTime(dynamic rawDate, dynamic rawTime) {
+  String _formatDateTime(dynamic rawScheduledDateTime) {
     try {
-      if (rawDate == null) return "N/A";
+      if (rawScheduledDateTime == null) return "N/A";
+
       DateTime dateTime;
-
-      if (rawDate is Timestamp) {
-        dateTime = rawDate.toDate();
-      } else if (rawDate is DateTime) {
-        dateTime = rawDate;
+      if (rawScheduledDateTime is Timestamp) {
+        dateTime = rawScheduledDateTime.toDate();
+      } else if (rawScheduledDateTime is DateTime) {
+        dateTime = rawScheduledDateTime;
       } else {
-        dateTime = DateTime.tryParse(rawDate.toString()) ?? DateTime.now();
+        dateTime = DateTime.tryParse(rawScheduledDateTime.toString()) ?? DateTime.now();
       }
 
-      if (rawTime != null && rawTime.toString().isNotEmpty) {
-        final parts = rawTime.toString().split(":");
-        if (parts.length >= 2) {
-          dateTime = DateTime(
-            dateTime.year,
-            dateTime.month,
-            dateTime.day,
-            int.tryParse(parts[0]) ?? dateTime.hour,
-            int.tryParse(parts[1]) ?? dateTime.minute,
-          );
-        }
-      }
       return DateFormat('MMM dd, yyyy – hh:mm a').format(dateTime);
     } catch (_) {
-      return rawDate.toString();
+      return rawScheduledDateTime.toString();
     }
   }
 
@@ -171,9 +159,12 @@ class _CustomerHomeState extends State<CustomerHome> {
             final booking = bookings[index].data() as Map<String, dynamic>;
             final services = booking["services"] as List<dynamic>? ?? [];
             final plate = booking["plateNumber"] ?? "N/A";
-            final date = booking["date"];
-            final time = booking["time"];
-            final formattedDateTime = _formatDateTime(date, time);
+
+            // Use unified datetime field (with fallback for legacy data)
+            final scheduledDateTime = booking["scheduledDateTime"] ??
+                                     booking["selectedDateTime"] ??
+                                     booking["date"];
+            final formattedDateTime = _formatDateTime(scheduledDateTime);
 
             return Card(
               margin: const EdgeInsets.all(12),
@@ -189,20 +180,9 @@ class _CustomerHomeState extends State<CustomerHome> {
                     Text("Date: $formattedDateTime"),
                     const SizedBox(height: 4),
                     Text(
-                      "Services: " +
-                          (services.isNotEmpty
-                              ? services
-                                    .map(
-                                      (s) =>
-                                          (s
-                                              as Map<
-                                                String,
-                                                dynamic
-                                              >)["serviceName"] ??
-                                          "",
-                                    )
-                                    .join(", ")
-                              : "N/A"),
+                      services.isNotEmpty
+                          ? "Services: ${services.map((s) => (s as Map<String, dynamic>)["serviceName"] ?? "").join(", ")}"
+                          : "Services: N/A",
                     ),
                   ],
                 ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:ec_carwash/data_models/booking_data.dart';
+import 'package:ec_carwash/data_models/booking_data_unified.dart';
+import 'package:ec_carwash/data_models/relationship_manager.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -316,62 +317,30 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
   Future<void> _createTransactionFromBooking(Booking booking) async {
     try {
-      final now = DateTime.now();
+      // Use unified system - creates transaction with all relationships
+      final transactionId = await RelationshipManager.completeBookingWithTransaction(
+        booking: booking,
+        cash: booking.totalAmount,
+        change: 0.0,
+        teamCommission: 0.0,
+      );
 
-      // Build customer data matching POS format
-      final customerMap = {
-        "id": booking.userId,
-        "plateNumber": booking.plateNumber.toUpperCase(),
-        "name": booking.userName,
-        "email": booking.userEmail,
-        "contactNumber": booking.contactNumber,
-        "vehicleType": booking.services.isNotEmpty ? booking.services.first.vehicleType : null,
-      };
-
-      // Build items matching POS format
-      final items = booking.services.map((service) {
-        return {
-          "serviceCode": service.serviceCode,
-          "vehicleType": service.vehicleType,
-          "price": service.price,
-          "quantity": 1,
-          "subtotal": service.price,
-        };
-      }).toList();
-
-      // Calculate total
-      final double totalAmount = booking.totalAmount;
-
-      // Create transaction payload matching POS format
-      final payload = {
-        "customer": customerMap,
-        "items": items,
-        "total": totalAmount,
-        "cash": totalAmount, // Assume exact payment for bookings
-        "change": 0.0,
-        "date": Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
-        "time": {
-          "hour": booking.selectedDateTime.hour,
-          "minute": booking.selectedDateTime.minute,
-          "formatted": TimeOfDay.fromDateTime(booking.selectedDateTime).format(context),
-        },
-        "createdAt": FieldValue.serverTimestamp(),
-        "transactionAt": Timestamp.fromDate(booking.selectedDateTime),
-        "status": "paid",
-        "source": "booking", // Mark as coming from booking system
-        "bookingId": booking.id, // Reference to original booking
-      };
-
-      // Save to Transactions collection
-      await FirebaseFirestore.instance.collection("Transactions").add(payload);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Transaction created: ${transactionId.substring(0, 8)}...'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
       throw Exception('Failed to create transaction from booking: $e');
     }
   }
 
   Future<void> _showRescheduleDialog(Booking booking) async {
-    DateTime? selectedDate = booking.selectedDateTime;
-    TimeOfDay? selectedTime = TimeOfDay.fromDateTime(booking.selectedDateTime);
+    DateTime? selectedDate = booking.scheduledDateTime;
+    TimeOfDay? selectedTime = TimeOfDay.fromDateTime(booking.scheduledDateTime);
 
     await showDialog(
       context: context,
@@ -432,13 +401,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                         selectedTime!.hour,
                         selectedTime!.minute,
                       );
-                      final timeString = selectedTime!.format(context);
                       Navigator.pop(context);
                       await _rescheduleBooking(
                         booking.id!,
                         newDateTime,
-                        newDateTime.toIso8601String(),
-                        timeString,
                       );
                     }
                   : null,
@@ -450,9 +416,9 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     );
   }
 
-  Future<void> _rescheduleBooking(String bookingId, DateTime newDateTime, String newDate, String newTime) async {
+  Future<void> _rescheduleBooking(String bookingId, DateTime newDateTime) async {
     try {
-      await BookingManager.rescheduleBooking(bookingId, newDateTime, newDate, newTime);
+      await BookingManager.rescheduleBooking(bookingId, newDateTime);
       await _loadBookings(); // Refresh the list
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -822,7 +788,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    DateFormat('MMM dd, yyyy').format(booking.selectedDateTime),
+                    DateFormat('MMM dd, yyyy').format(booking.scheduledDateTime),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
@@ -831,7 +797,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    booking.time,
+                    TimeOfDay.fromDateTime(booking.scheduledDateTime).format(context),
                     style: const TextStyle(
                       fontSize: 11,
                       color: Colors.blue,
