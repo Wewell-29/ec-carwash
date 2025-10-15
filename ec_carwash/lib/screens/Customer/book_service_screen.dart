@@ -2,13 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:ec_carwash/data_models/services_data.dart';
 import 'package:ec_carwash/data_models/booking_data_unified.dart';
 import 'package:ec_carwash/data_models/relationship_manager.dart';
+import 'package:ec_carwash/data_models/customer_data_unified.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'cart_item.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'customer_home.dart';
 import 'booking_history.dart';
+import 'account_info_screen.dart';
+import 'notifications_screen.dart';
 
 class BookServiceScreen extends StatefulWidget {
-  const BookServiceScreen({super.key});
+  final Map<String, dynamic>? rebookData;
+
+  const BookServiceScreen({super.key, this.rebookData});
 
   @override
   State<BookServiceScreen> createState() => _BookServiceScreenState();
@@ -24,8 +30,10 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   List<Service> _services = [];
   bool _isLoadingServices = true;
 
-  final TextEditingController _plateController = TextEditingController();
-  final TextEditingController _contactController = TextEditingController();
+  // User's vehicles
+  List<Customer> _userVehicles = [];
+  bool _isLoadingVehicles = true;
+  Customer? _selectedVehicle;
 
   String _selectedMenu = "Book"; // for drawer highlighting
 
@@ -34,12 +42,80 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   void initState() {
     super.initState();
     _loadServices();
+    _loadUserVehicles();
+    _handleRebookData();
+  }
+
+  void _handleRebookData() {
+    if (widget.rebookData == null) return;
+
+    // Wait for services and vehicles to load before populating the cart
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+
+      final rebookData = widget.rebookData!;
+      final plateNumber = rebookData['plateNumber'] as String?;
+      final services = (rebookData['services'] as List<dynamic>?) ?? [];
+
+      // Find and select the vehicle by plate number
+      if (plateNumber != null && _userVehicles.isNotEmpty) {
+        try {
+          final vehicle = _userVehicles.firstWhere(
+            (v) => v.plateNumber.toUpperCase() == plateNumber.toUpperCase(),
+          );
+
+          setState(() {
+            _selectedVehicle = vehicle;
+          });
+        } catch (e) {
+          // Vehicle not found, user might need to add it
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Vehicle with plate $plateNumber not found. Please select a vehicle.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      }
+
+      // Populate cart with the services from the previous booking
+      for (final serviceData in services) {
+        final serviceCode = (serviceData['serviceCode'] ?? serviceData['code'] ?? '') as String;
+        final serviceName = (serviceData['serviceName'] ?? '') as String;
+        final vehicleType = (serviceData['vehicleType'] ?? '') as String;
+        final price = (serviceData['price'] ?? 0) as num;
+
+        if (serviceCode.isNotEmpty && serviceName.isNotEmpty && vehicleType.isNotEmpty) {
+          setState(() {
+            _cart.add(
+              CartItem(
+                serviceKey: serviceCode,
+                serviceName: serviceName,
+                vehicleType: vehicleType,
+                price: price.toInt(),
+              ),
+            );
+          });
+        }
+      }
+
+      // Show a message to the user emphasizing they need to select date/time
+      if (mounted && _cart.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✓ Services loaded! Please select a new date and time for your booking.'),
+            backgroundColor: Colors.blue,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    });
   }
 
   @override
   void dispose() {
-    _plateController.dispose();
-    _contactController.dispose();
     super.dispose();
   }
 
@@ -55,6 +131,37 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading services: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadUserVehicles() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user?.email == null) {
+      setState(() => _isLoadingVehicles = false);
+      return;
+    }
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('Customers')
+          .where('email', isEqualTo: user!.email)
+          .get();
+
+      final vehicles = snapshot.docs
+          .map((doc) => Customer.fromJson(doc.data(), doc.id))
+          .toList();
+
+      setState(() {
+        _userVehicles = vehicles;
+        _isLoadingVehicles = false;
+      });
+    } catch (e) {
+      setState(() => _isLoadingVehicles = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading vehicles: $e')),
         );
       }
     }
@@ -127,12 +234,11 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     if (_cart.isEmpty ||
         _selectedDate == null ||
         _selectedTime == null ||
-        _plateController.text.trim().isEmpty ||
-        _contactController.text.trim().isEmpty) {
+        _selectedVehicle == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            "Please select services, date, time, plate number, and contact number",
+            "Please select a vehicle, services, date, and time",
           ),
         ),
       );
@@ -152,10 +258,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final plateNumber = _plateController.text.trim();
-      final contactNumber = _contactController.text.trim();
       final selectedDateTime = _combinedSelectedDateTime()!;
-      final vehicleType = _cart.isNotEmpty ? _cart.first.vehicleType : null;
 
       // Convert cart to BookingService list
       final services = _cart.map((item) => BookingService(
@@ -171,9 +274,9 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
         userName: user.displayName ?? 'Customer',
         userEmail: user.email!,
         userId: user.uid,
-        plateNumber: plateNumber,
-        contactNumber: contactNumber,
-        vehicleType: vehicleType,
+        plateNumber: _selectedVehicle!.plateNumber,
+        contactNumber: _selectedVehicle!.contactNumber,
+        vehicleType: _selectedVehicle!.vehicleType,
         scheduledDateTime: selectedDateTime,
         services: services,
         source: 'customer-app',
@@ -184,8 +287,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
         _cart.clear();
         _selectedDate = null;
         _selectedTime = null;
-        _plateController.clear();
-        _contactController.clear();
+        _selectedVehicle = null;
         _isLoading = false;
       });
 
@@ -297,53 +399,177 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                           const SizedBox(height: 12),
                         ],
 
-                        // Plate number
-                        TextField(
-                          controller: _plateController,
-                          decoration: const InputDecoration(
-                            labelText: "Plate Number",
-                            border: OutlineInputBorder(),
+                        // Vehicle selection
+                        if (_userVehicles.isEmpty)
+                          Card(
+                            color: Colors.orange[50],
+                            child: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Column(
+                                children: [
+                                  const Text(
+                                    'No vehicles registered',
+                                    style: TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ElevatedButton.icon(
+                                    onPressed: () {
+                                      Navigator.pop(context);
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const AccountInfoScreen(),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('Add Vehicle'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.yellow[700],
+                                      foregroundColor: Colors.black,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        else
+                          StatefulBuilder(
+                            builder: (context, setDialogState) {
+                              return DropdownButtonFormField<Customer>(
+                                decoration: const InputDecoration(
+                                  labelText: "Select Vehicle",
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.directions_car),
+                                ),
+                                value: _selectedVehicle,
+                                items: _userVehicles.map((vehicle) {
+                                  return DropdownMenuItem(
+                                    value: vehicle,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          vehicle.plateNumber,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        Text(
+                                          '${vehicle.vehicleType ?? "Unknown"} • ${vehicle.contactNumber}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }).toList(),
+                                onChanged: (vehicle) {
+                                  setState(() {
+                                    _selectedVehicle = vehicle;
+                                    // Clear cart when vehicle changes
+                                    _cart.clear();
+                                  });
+                                  Navigator.pop(context);
+                                  _showCart();
+                                },
+                              );
+                            }
                           ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Contact number
-                        TextField(
-                          controller: _contactController,
-                          keyboardType: TextInputType.phone,
-                          decoration: const InputDecoration(
-                            labelText: "Contact Number",
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
                         const SizedBox(height: 16),
 
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: _pickDate,
-                                child: Text(
-                                  _selectedDate == null
-                                      ? "Pick Date"
-                                      : "${_selectedDate!.toLocal()}".split(
-                                          ' ',
-                                        )[0],
-                                ),
-                              ),
+                        // Date and Time Selection
+                        Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: (_selectedDate == null || _selectedTime == null)
+                                  ? Colors.orange
+                                  : Colors.green,
+                              width: 2,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: _pickTime,
-                                child: Text(
-                                  _selectedTime == null
-                                      ? "Pick Time"
-                                      : _selectedTime!.format(context),
-                                ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.calendar_today,
+                                    size: 20,
+                                    color: (_selectedDate == null || _selectedTime == null)
+                                        ? Colors.orange
+                                        : Colors.green,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    (_selectedDate == null || _selectedTime == null)
+                                        ? 'Select Date & Time (Required)'
+                                        : 'Date & Time Selected',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: (_selectedDate == null || _selectedTime == null)
+                                          ? Colors.orange
+                                          : Colors.green,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: _pickDate,
+                                      icon: const Icon(Icons.event, size: 18),
+                                      label: Text(
+                                        _selectedDate == null
+                                            ? "Pick Date"
+                                            : "${_selectedDate!.toLocal()}".split(' ')[0],
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: _selectedDate == null
+                                            ? Colors.orange
+                                            : Colors.black,
+                                        side: BorderSide(
+                                          color: _selectedDate == null
+                                              ? Colors.orange
+                                              : Colors.grey,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: _pickTime,
+                                      icon: const Icon(Icons.access_time, size: 18),
+                                      label: Text(
+                                        _selectedTime == null
+                                            ? "Pick Time"
+                                            : _selectedTime!.format(context),
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: _selectedTime == null
+                                            ? Colors.orange
+                                            : Colors.black,
+                                        side: BorderSide(
+                                          color: _selectedTime == null
+                                              ? Colors.orange
+                                              : Colors.grey,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 16),
                         ElevatedButton(
@@ -400,6 +626,16 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
         context,
         MaterialPageRoute(builder: (context) => const BookingHistoryScreen()),
       );
+    } else if (menu == 'Notifications') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+      );
+    } else if (menu == 'Account') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const AccountInfoScreen()),
+      );
     } else if (menu == 'Logout') {
       // TODO: implement logout
     }
@@ -407,8 +643,8 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Show loading indicator while services are loading
-    if (_isLoadingServices) {
+    // Show loading indicator while services or vehicles are loading
+    if (_isLoadingServices || _isLoadingVehicles) {
       return Scaffold(
         appBar: AppBar(
           title: const Text("Book a Service"),
@@ -417,15 +653,6 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
           child: CircularProgressIndicator(),
         ),
       );
-    }
-
-    // Build list of vehicle types from productsData
-    final vehicleTypes = <String>{};
-    for (var entry in productsData.entries) {
-      final prices = entry.value['prices'] as Map<String, dynamic>;
-      for (var k in prices.keys) {
-        vehicleTypes.add(k.toString());
-      }
     }
 
     return Scaffold(
@@ -502,6 +729,20 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
               selectedTileColor: Colors.yellow[100],
               onTap: () => _navigateFromDrawer('History'),
             ),
+            ListTile(
+              leading: const Icon(Icons.notifications),
+              title: const Text("Notifications"),
+              selected: _selectedMenu == 'Notifications',
+              selectedTileColor: Colors.yellow[100],
+              onTap: () => _navigateFromDrawer('Notifications'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.account_circle),
+              title: const Text("Account"),
+              selected: _selectedMenu == 'Account',
+              selectedTileColor: Colors.yellow[100],
+              onTap: () => _navigateFromDrawer('Account'),
+            ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout),
@@ -512,53 +753,129 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
         ),
       ),
 
-      // Vehicle selection grid (2 columns)
-      body: GridView.count(
-        crossAxisCount: 2,
-        padding: const EdgeInsets.all(16),
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        children: vehicleTypes.map((type) {
-          return GestureDetector(
-            onTap: () {
-              // go to services for this vehicle
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => VehicleServicesScreen(
-                    vehicleType: type,
-                    onAddToCart: _addToCart,
-                    cart: _cart,
-                    showCart: _showCart,
-                    productsData: productsData,
-                  ),
+      // Vehicle and services selection
+      body: _userVehicles.isEmpty
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.directions_car_outlined,
+                      size: 100,
+                      color: Colors.grey[400],
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'No vehicles registered',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Please add a vehicle to start booking services',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const AccountInfoScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Vehicle'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.yellow[700],
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 16,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              );
-            },
-            child: Card(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
               ),
-              elevation: 4,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(_getVehicleIcon(type), size: 50, color: Colors.blue),
-                  const SizedBox(height: 8),
-                  Text(
-                    type,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+            )
+          : GridView.count(
+              crossAxisCount: 2,
+              padding: const EdgeInsets.all(16),
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              children: _userVehicles.map((vehicle) {
+                return GestureDetector(
+                  onTap: () {
+                    // Set selected vehicle and navigate to services
+                    setState(() {
+                      _selectedVehicle = vehicle;
+                      _cart.clear(); // Clear cart when switching vehicles
+                    });
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VehicleServicesScreen(
+                          vehicleType: vehicle.vehicleType ?? '',
+                          onAddToCart: _addToCart,
+                          cart: _cart,
+                          showCart: _showCart,
+                          productsData: productsData,
+                        ),
+                      ),
+                    );
+                  },
+                  child: Card(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 4,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _getVehicleIcon(vehicle.vehicleType ?? ''),
+                            size: 50,
+                            color: Colors.blue,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            vehicle.plateNumber,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            vehicle.vehicleType ?? 'Unknown',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
+                );
+              }).toList(),
             ),
-          );
-        }).toList(),
-      ),
     );
   }
 

@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'book_service_screen.dart';
 import 'booking_history.dart';
+import 'account_info_screen.dart';
+import 'notifications_screen.dart';
 
 class CustomerHome extends StatefulWidget {
   const CustomerHome({super.key});
@@ -27,6 +29,16 @@ class _CustomerHomeState extends State<CustomerHome> {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => const BookingHistoryScreen()),
+      );
+    } else if (menu == "Notifications") {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+      );
+    } else if (menu == "Account") {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const AccountInfoScreen()),
       );
     }
   }
@@ -104,6 +116,20 @@ class _CustomerHomeState extends State<CustomerHome> {
                 selected: _selectedMenu == "History",
                 selectedTileColor: Colors.yellow[100],
                 onTap: () => _onSelect("History"),
+              ),
+              ListTile(
+                leading: const Icon(Icons.notifications),
+                title: const Text("Notifications"),
+                selected: _selectedMenu == "Notifications",
+                selectedTileColor: Colors.yellow[100],
+                onTap: () => _onSelect("Notifications"),
+              ),
+              ListTile(
+                leading: const Icon(Icons.account_circle),
+                title: const Text("Account"),
+                selected: _selectedMenu == "Account",
+                selectedTileColor: Colors.yellow[100],
+                onTap: () => _onSelect("Account"),
               ),
               const Divider(),
               ListTile(
