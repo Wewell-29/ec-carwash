@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // ✅ Firestore
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:ec_carwash/data_models/services_data.dart';
 import 'package:ec_carwash/data_models/inventory_data.dart';
-import 'package:ec_carwash/data_models/customer_data.dart';
+import 'package:ec_carwash/data_models/customer_data_unified.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -125,21 +125,49 @@ class _POSScreenState extends State<POSScreen> {
       return;
     }
 
-    setState(() {
-      final index = cart.indexWhere(
-        (item) => item["code"] == code && item["category"] == category,
-      );
-      if (index >= 0) {
+    // Get the service name from servicesData
+    final serviceName = servicesData[code]?["name"] ?? code;
+
+    final index = cart.indexWhere(
+      (item) => item["code"] == code && item["category"] == category,
+    );
+
+    if (index >= 0) {
+      // Already in cart - increase quantity and show notification
+      setState(() {
         cart[index]["quantity"] = (cart[index]["quantity"] ?? 0) + 1;
-      } else {
+      });
+
+      if (mounted) {
+        final currentQty = cart[index]["quantity"] as int;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.info, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('$serviceName already in cart! Quantity increased to $currentQty'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.blue.shade700,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } else {
+      // New item - add to cart
+      setState(() {
         cart.add({
           "code": code,
+          "name": serviceName,
           "category": category,
           "price": price.toDouble(),
           "quantity": 1,
         });
-      }
-    });
+      });
+    }
   }
 
   void removeFromCart(int index) {
@@ -214,7 +242,7 @@ class _POSScreenState extends State<POSScreen> {
     try {
       // Try plate search first (more specific)
       if (query.length >= 3) {
-        final customer = await CustomerService.getCustomerByPlateNumber(query);
+        final customer = await CustomerManager.getCustomerByPlateNumber(query);
         if (customer != null) {
           setState(() {
             _searchResults = [customer];
@@ -236,7 +264,7 @@ class _POSScreenState extends State<POSScreen> {
 
         for (final variation in variations) {
           try {
-            final customers = await CustomerService.searchCustomersByName(variation);
+            final customers = await CustomerManager.searchCustomersByName(variation);
             if (customers.isNotEmpty) {
               setState(() {
                 _searchResults = customers;
@@ -298,7 +326,7 @@ class _POSScreenState extends State<POSScreen> {
       'name': base.name,
       'plateNumber': plate,
       'email': base.email,
-      'contactNumber': base.phoneNumber,
+      'contactNumber': base.contactNumber,
       if (_selectedVehicleType != null && _selectedVehicleType!.isNotEmpty)
         'vehicleType': _selectedVehicleType,
       'lastVisit': base.lastVisit.toIso8601String(),
@@ -332,7 +360,7 @@ class _POSScreenState extends State<POSScreen> {
         name: nameController.text.trim(),
         plateNumber: plateController.text.trim().toUpperCase(),
         email: emailController.text.trim(),
-        phoneNumber: phoneController.text.trim(),
+        contactNumber: phoneController.text.trim(),
         createdAt: currentCustomer?.createdAt ?? DateTime.now(),
         lastVisit: DateTime.now(),
         vehicleType: _selectedVehicleType,
@@ -528,14 +556,22 @@ class _POSScreenState extends State<POSScreen> {
               final product = servicesData[code];
               if (product == null) return const SizedBox();
 
-              return Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _handleAddService(code),
-                  splashColor: Colors.yellow.shade200,
-                  highlightColor: Colors.yellow.shade100,
-                  child: Container(
+              // Check if service is applicable for current vehicle type
+              final prices = product["prices"] as Map<String, dynamic>;
+              final bool isApplicable = _vehicleTypeForCustomer == null ||
+                                       _vehicleTypeForCustomer!.isEmpty ||
+                                       prices.containsKey(_vehicleTypeForCustomer);
+
+              return Opacity(
+                opacity: isApplicable ? 1.0 : 0.4,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: isApplicable ? () => _handleAddService(code) : null,
+                    splashColor: isApplicable ? Colors.yellow.shade200 : null,
+                    highlightColor: isApplicable ? Colors.yellow.shade100 : null,
+                    child: Container(
                     decoration: BoxDecoration(
                       // Modern gradient with brand colors
                       gradient: LinearGradient(
@@ -649,7 +685,8 @@ class _POSScreenState extends State<POSScreen> {
                       ),
                     ),
                   ),
-                ),
+                    ),
+                  ),
               );
             },
           ),
@@ -2357,6 +2394,10 @@ class _POSScreenState extends State<POSScreen> {
                                     final navigator = Navigator.of(context);
                                     final team = selectedTeam!;
 
+                                    // Save cart data before clearing
+                                    final cartSnapshot = List<Map<String, dynamic>>.from(cart);
+                                    final totalSnapshot = total;
+
                                     await _saveTransactionToFirestore(
                                       cash: cash,
                                       change: change,
@@ -2369,6 +2410,8 @@ class _POSScreenState extends State<POSScreen> {
                                         cash: cash,
                                         change: change,
                                         assignedTeam: team,
+                                        cartItems: cartSnapshot,
+                                        total: totalSnapshot,
                                       );
                                     }
                                   }
@@ -2411,7 +2454,13 @@ class _POSScreenState extends State<POSScreen> {
     );
   }
 
-  void _showReceipt({required double cash, required double change, String? assignedTeam}) {
+  void _showReceipt({
+    required double cash,
+    required double change,
+    String? assignedTeam,
+    required List<Map<String, dynamic>> cartItems,
+    required double total,
+  }) {
     showDialog(
       context: context,
       builder: (context) {
@@ -2521,10 +2570,11 @@ class _POSScreenState extends State<POSScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        ...cart.map((item) {
+                        ...cartItems.map((item) {
                           final price = (item["price"] as num).toDouble();
                           final qty = (item["quantity"] ?? 0) as int;
                           final subtotal = price * qty;
+                          final serviceName = item["name"]?.toString() ?? item["code"]?.toString() ?? "";
                           return Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(16),
@@ -2541,7 +2591,7 @@ class _POSScreenState extends State<POSScreen> {
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        "${item["code"]}",
+                                        serviceName,
                                         style: const TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 16,
@@ -2683,137 +2733,386 @@ class _POSScreenState extends State<POSScreen> {
                       flex: 2,
                       child: ElevatedButton(
                         onPressed: () async {
-                          final pdf = pw.Document();
+                          try {
+                            final pdf = pw.Document();
 
-                          final String formattedTime = _formatTimeOfDay(
-                            context,
-                            _selectedTime,
-                          );
-                          final String formattedDate = DateTime.now()
-                              .toString()
-                              .substring(0, 10);
+                            // Generate transaction ID
+                            final transactionId = 'TXN${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
+                            final now = DateTime.now();
+                            final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+                            final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
 
-                          final robotoRegular = pw.Font.ttf(
-                            await rootBundle.load("assets/fonts/Roboto-Regular.ttf"),
-                          );
-                          final robotoBold = pw.Font.ttf(
-                            await rootBundle.load("assets/fonts/Roboto-Bold.ttf"),
-                          );
+                            // Try to load fonts, fallback to default
+                            pw.Font? regularFont;
+                            pw.Font? boldFont;
+                            try {
+                              regularFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Regular.ttf"));
+                              boldFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Bold.ttf"));
+                            } catch (e) {
+                              debugPrint('Using default fonts: $e');
+                            }
 
-                          pdf.addPage(
-                            pw.Page(
-                              build: (pw.Context ctx) {
-                                return pw.DefaultTextStyle(
-                                  style: pw.TextStyle(font: robotoRegular, fontSize: 12),
-                                  child: pw.Column(
-                                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            // Thermal receipt style - 80mm width (226.77 points)
+                            pdf.addPage(
+                              pw.Page(
+                                pageFormat: const PdfPageFormat(226.77, double.infinity, marginAll: 10),
+                                build: (pw.Context ctx) {
+                                  return pw.Column(
+                                    crossAxisAlignment: pw.CrossAxisAlignment.center,
                                     children: [
+                                      // Header - Business Name
                                       pw.Text(
-                                        "Carwash Receipt",
+                                        "EC CARWASH",
                                         style: pw.TextStyle(
-                                          font: robotoBold,
-                                          fontSize: 20,
+                                          font: boldFont,
+                                          fontSize: 16,
+                                          fontWeight: pw.FontWeight.bold,
                                         ),
                                       ),
-                                      pw.SizedBox(height: 6),
+                                      pw.SizedBox(height: 2),
                                       pw.Text(
-                                        "Date: $formattedDate   Time: $formattedTime",
-                                      ),
-                                      if (assignedTeam != null)
-                                        pw.Text(
-                                          "Assigned Team: $assignedTeam",
-                                          style: pw.TextStyle(font: robotoBold),
+                                        "Balayan Batangas",
+                                        style: pw.TextStyle(
+                                          font: regularFont,
+                                          fontSize: 8,
                                         ),
-                                      pw.SizedBox(height: 10),
-                                      pw.Table(
-                                        border: pw.TableBorder.all(width: 0.5),
-                                        columnWidths: {
-                                          0: const pw.FlexColumnWidth(2),
-                                          1: const pw.FlexColumnWidth(1),
-                                          2: const pw.FlexColumnWidth(1),
-                                          3: const pw.FlexColumnWidth(1.5),
-                                        },
-                                        children: [
-                                          pw.TableRow(
-                                            decoration: const pw.BoxDecoration(
-                                              color: PdfColors.grey300,
-                                            ),
-                                            children: [
-                                              _cell("Service", robotoBold),
-                                              _cell("Qty", robotoBold),
-                                              _cell("Price", robotoBold),
-                                              _cell("Subtotal", robotoBold),
+                                      ),
+                                      pw.SizedBox(height: 4),
+                                      pw.Text(
+                                        "SALES INVOICE",
+                                        style: pw.TextStyle(
+                                          font: boldFont,
+                                          fontSize: 10,
+                                          fontWeight: pw.FontWeight.bold,
+                                        ),
+                                      ),
+                                      pw.SizedBox(height: 8),
+
+                                      // Divider
+                                      pw.Divider(thickness: 1),
+
+                                      // Transaction Info
+                                      pw.Container(
+                                        width: double.infinity,
+                                        child: pw.Column(
+                                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                          children: [
+                                            _receiptRow("TXN ID:", transactionId, boldFont),
+                                            _receiptRow("Date:", dateStr, regularFont),
+                                            _receiptRow("Time:", timeStr, regularFont),
+                                            if (currentCustomer != null) ...[
+                                              pw.SizedBox(height: 4),
+                                              _receiptRow("Customer:", currentCustomer!.name, regularFont),
+                                              _receiptRow("Plate No:", currentCustomer!.plateNumber, regularFont),
+                                              if (currentCustomer!.contactNumber.isNotEmpty)
+                                                _receiptRow("Contact:", currentCustomer!.contactNumber, regularFont),
+                                              if (_vehicleTypeForCustomer != null && _vehicleTypeForCustomer!.isNotEmpty)
+                                                _receiptRow("Vehicle:", _vehicleTypeForCustomer!, regularFont),
                                             ],
-                                          ),
-                                          ...cart.map((item) {
-                                            final price = (item["price"] as num)
-                                                .toDouble();
-                                            final qty = (item["quantity"] ?? 0) as int;
-                                            final subtotal = price * qty;
-                                            return pw.TableRow(
+                                            if (assignedTeam != null)
+                                              _receiptRow("Team:", assignedTeam, regularFont),
+                                          ],
+                                        ),
+                                      ),
+
+                                      pw.Divider(thickness: 1),
+
+                                      // Items header
+                                      pw.Container(
+                                        width: double.infinity,
+                                        child: pw.Row(
+                                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            pw.Expanded(
+                                              flex: 3,
+                                              child: pw.Text(
+                                                "ITEM",
+                                                style: pw.TextStyle(
+                                                  font: boldFont,
+                                                  fontSize: 8,
+                                                  fontWeight: pw.FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                            pw.Container(
+                                              width: 25,
+                                              child: pw.Text(
+                                                "QTY",
+                                                style: pw.TextStyle(
+                                                  font: boldFont,
+                                                  fontSize: 8,
+                                                  fontWeight: pw.FontWeight.bold,
+                                                ),
+                                                textAlign: pw.TextAlign.center,
+                                              ),
+                                            ),
+                                            pw.Container(
+                                              width: 45,
+                                              child: pw.Text(
+                                                "PRICE",
+                                                style: pw.TextStyle(
+                                                  font: boldFont,
+                                                  fontSize: 8,
+                                                  fontWeight: pw.FontWeight.bold,
+                                                ),
+                                                textAlign: pw.TextAlign.right,
+                                              ),
+                                            ),
+                                            pw.Container(
+                                              width: 50,
+                                              child: pw.Text(
+                                                "AMOUNT",
+                                                style: pw.TextStyle(
+                                                  font: boldFont,
+                                                  fontSize: 8,
+                                                  fontWeight: pw.FontWeight.bold,
+                                                ),
+                                                textAlign: pw.TextAlign.right,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+
+                                      pw.Container(
+                                        width: double.infinity,
+                                        height: 0.5,
+                                        color: PdfColors.black,
+                                      ),
+
+                                      // Items
+                                      ...cartItems.map((item) {
+                                        final price = (item["price"] as num).toDouble();
+                                        final qty = (item["quantity"] ?? 0) as int;
+                                        final subtotal = price * qty;
+                                        final serviceName = item["name"]?.toString() ?? item["code"]?.toString() ?? "";
+                                        final serviceCategory = item["category"]?.toString() ?? "";
+                                        return pw.Column(
+                                          children: [
+                                            pw.SizedBox(height: 4),
+                                            pw.Container(
+                                              width: double.infinity,
+                                              child: pw.Column(
+                                                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                                children: [
+                                                  // Service name
+                                                  pw.Text(
+                                                    serviceName,
+                                                    style: pw.TextStyle(
+                                                      font: boldFont,
+                                                      fontSize: 9,
+                                                      fontWeight: pw.FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                  pw.SizedBox(height: 2),
+                                                  // Price row with qty, price, amount
+                                                  pw.Row(
+                                                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                                    children: [
+                                                      pw.Text(
+                                                        "  $serviceCategory",
+                                                        style: pw.TextStyle(
+                                                          font: regularFont,
+                                                          fontSize: 7,
+                                                          color: PdfColors.grey700,
+                                                        ),
+                                                      ),
+                                                      pw.Row(
+                                                        children: [
+                                                          pw.Container(
+                                                            width: 25,
+                                                            child: pw.Text(
+                                                              "$qty",
+                                                              style: pw.TextStyle(
+                                                                font: regularFont,
+                                                                fontSize: 9,
+                                                              ),
+                                                              textAlign: pw.TextAlign.center,
+                                                            ),
+                                                          ),
+                                                          pw.Container(
+                                                            width: 45,
+                                                            child: pw.Text(
+                                                              "P${price.toStringAsFixed(2)}",
+                                                              style: pw.TextStyle(
+                                                                font: regularFont,
+                                                                fontSize: 9,
+                                                              ),
+                                                              textAlign: pw.TextAlign.right,
+                                                            ),
+                                                          ),
+                                                          pw.Container(
+                                                            width: 50,
+                                                            child: pw.Text(
+                                                              "P${subtotal.toStringAsFixed(2)}",
+                                                              style: pw.TextStyle(
+                                                                font: regularFont,
+                                                                fontSize: 9,
+                                                              ),
+                                                              textAlign: pw.TextAlign.right,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            pw.SizedBox(height: 4),
+                                          ],
+                                        );
+                                      }),
+
+                                      pw.Divider(thickness: 1),
+
+                                      // Totals
+                                      pw.Container(
+                                        width: double.infinity,
+                                        child: pw.Column(
+                                          children: [
+                                            pw.Row(
+                                              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                                               children: [
-                                                _cell(
-                                                  "${item["code"]} - ${item["category"]}",
-                                                  robotoRegular,
+                                                pw.Text(
+                                                  "SUBTOTAL:",
+                                                  style: pw.TextStyle(
+                                                    font: regularFont,
+                                                    fontSize: 9,
+                                                  ),
                                                 ),
-                                                _cell("$qty", robotoRegular),
-                                                _cell(
-                                                  "₱${price.toStringAsFixed(2)}",
-                                                  robotoRegular,
-                                                ),
-                                                _cell(
-                                                  "₱${subtotal.toStringAsFixed(2)}",
-                                                  robotoRegular,
+                                                pw.Text(
+                                                  "P${total.toStringAsFixed(2)}",
+                                                  style: pw.TextStyle(
+                                                    font: regularFont,
+                                                    fontSize: 9,
+                                                  ),
                                                 ),
                                               ],
-                                            );
-                                          }),
-                                        ],
-                                      ),
-                                      pw.SizedBox(height: 12),
-                                      pw.Row(
-                                        mainAxisAlignment: pw.MainAxisAlignment.end,
-                                        children: [
-                                          pw.Column(
-                                            crossAxisAlignment: pw.CrossAxisAlignment.end,
-                                            children: [
-                                              pw.Text(
-                                                "Total: ₱${total.toStringAsFixed(2)}",
-                                                style: pw.TextStyle(font: robotoBold),
-                                              ),
-                                              pw.Text(
-                                                "Cash: ₱${cash.toStringAsFixed(2)}",
-                                              ),
-                                              pw.Text(
-                                                "Change: ₱${change.toStringAsFixed(2)}",
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                      pw.SizedBox(height: 20),
-                                      pw.Text(
-                                        "Thank you for your payment!",
-                                        style: pw.TextStyle(
-                                          font: robotoRegular,
-                                          fontStyle: pw.FontStyle.italic,
+                                            ),
+                                            pw.SizedBox(height: 2),
+                                            pw.Row(
+                                              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                pw.Text(
+                                                  "TOTAL:",
+                                                  style: pw.TextStyle(
+                                                    font: boldFont,
+                                                    fontSize: 12,
+                                                    fontWeight: pw.FontWeight.bold,
+                                                  ),
+                                                ),
+                                                pw.Text(
+                                                  "P${total.toStringAsFixed(2)}",
+                                                  style: pw.TextStyle(
+                                                    font: boldFont,
+                                                    fontSize: 12,
+                                                    fontWeight: pw.FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            pw.SizedBox(height: 4),
+                                            pw.Row(
+                                              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                pw.Text(
+                                                  "Cash:",
+                                                  style: pw.TextStyle(
+                                                    font: regularFont,
+                                                    fontSize: 9,
+                                                  ),
+                                                ),
+                                                pw.Text(
+                                                  "P${cash.toStringAsFixed(2)}",
+                                                  style: pw.TextStyle(
+                                                    font: regularFont,
+                                                    fontSize: 9,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            pw.SizedBox(height: 2),
+                                            pw.Row(
+                                              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                pw.Text(
+                                                  "Change:",
+                                                  style: pw.TextStyle(
+                                                    font: regularFont,
+                                                    fontSize: 9,
+                                                  ),
+                                                ),
+                                                pw.Text(
+                                                  "P${change.toStringAsFixed(2)}",
+                                                  style: pw.TextStyle(
+                                                    font: regularFont,
+                                                    fontSize: 9,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
                                         ),
                                       ),
+
+                                      pw.Divider(thickness: 1),
+
+                                      // Footer
+                                      pw.SizedBox(height: 4),
+                                      pw.Text(
+                                        "THANK YOU FOR YOUR BUSINESS!",
+                                        style: pw.TextStyle(
+                                          font: boldFont,
+                                          fontSize: 8,
+                                          fontWeight: pw.FontWeight.bold,
+                                        ),
+                                        textAlign: pw.TextAlign.center,
+                                      ),
+                                      pw.SizedBox(height: 2),
+                                      pw.Text(
+                                        "Please come again",
+                                        style: pw.TextStyle(
+                                          font: regularFont,
+                                          fontSize: 7,
+                                        ),
+                                        textAlign: pw.TextAlign.center,
+                                      ),
+                                      pw.SizedBox(height: 8),
+                                      pw.Text(
+                                        "This serves as your official receipt",
+                                        style: pw.TextStyle(
+                                          font: regularFont,
+                                          fontSize: 6,
+                                          fontStyle: pw.FontStyle.italic,
+                                        ),
+                                        textAlign: pw.TextAlign.center,
+                                      ),
                                     ],
-                                  ),
-                                );
-                              },
-                            ),
-                          );
+                                  );
+                                },
+                              ),
+                            );
 
-                          await Printing.sharePdf(
-                            bytes: await pdf.save(),
-                            filename: "receipt.pdf",
-                          );
+                            await Printing.sharePdf(
+                              bytes: await pdf.save(),
+                              filename: "receipt_$transactionId.pdf",
+                            );
 
-                          if (mounted) {
-                            setState(() => cart.clear());
-                            if (context.mounted) Navigator.pop(context);
+                            if (mounted) {
+                              setState(() => cart.clear());
+                              if (context.mounted) Navigator.pop(context);
+                            }
+                          } catch (e) {
+                            debugPrint('Error generating receipt: $e');
+                            if (mounted && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Error generating receipt: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
                           }
                         },
                         style: ElevatedButton.styleFrom(
@@ -2850,7 +3149,25 @@ class _POSScreenState extends State<POSScreen> {
   }
 }
 
-pw.Widget _cell(String text, pw.Font font) => pw.Padding(
-  padding: const pw.EdgeInsets.all(4),
-  child: pw.Text(text, style: pw.TextStyle(font: font, fontSize: 12)),
-);
+// Helper for thermal receipt row
+pw.Widget _receiptRow(String label, String value, pw.Font? font) {
+  return pw.Row(
+    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+    children: [
+      pw.Text(
+        label,
+        style: pw.TextStyle(
+          font: font,
+          fontSize: 8,
+        ),
+      ),
+      pw.Text(
+        value,
+        style: pw.TextStyle(
+          font: font,
+          fontSize: 8,
+        ),
+      ),
+    ],
+  );
+}
