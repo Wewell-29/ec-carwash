@@ -1,1 +1,42 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"ec-carwash-app","appId":"1:14839235089:android:82dcc99e3ac5651280e7b0","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"ec-carwash-app","configurations":{"android":"1:14839235089:android:82dcc99e3ac5651280e7b0","ios":"1:14839235089:ios:3d56a72d455f4d4d80e7b0","macos":"1:14839235089:ios:3d56a72d455f4d4d80e7b0","web":"1:14839235089:web:e3a5bac8b83e21da80e7b0","windows":"1:14839235089:web:cd2387a3a818c57680e7b0"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "ec-carwash-app",
+          "appId": "1:14839235089:android:82dcc99e3ac5651280e7b0",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "ec-carwash-app",
+          "configurations": {
+            "android": "1:14839235089:android:82dcc99e3ac5651280e7b0",
+            "ios": "1:14839235089:ios:3d56a72d455f4d4d80e7b0",
+            "macos": "1:14839235089:ios:3d56a72d455f4d4d80e7b0",
+            "web": "1:14839235089:web:e3a5bac8b83e21da80e7b0",
+            "windows": "1:14839235089:web:cd2387a3a818c57680e7b0"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run lint",
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ]
+}
