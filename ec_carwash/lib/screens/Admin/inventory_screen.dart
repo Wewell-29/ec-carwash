@@ -87,14 +87,24 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final lowStockItems = _allItems.where((item) => item.isLowStock).toList();
     final lowStockCount = lowStockItems.length;
 
-    return Column(
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: Column(
         children: [
           _buildFilters(categories, isWide, lowStockCount),
           Expanded(
             child: _buildInventoryList(isWide),
           ),
         ],
-      );
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showAddItemDialog(),
+        backgroundColor: Colors.yellow.shade700,
+        foregroundColor: Colors.black87,
+        icon: const Icon(Icons.add),
+        label: const Text('Add Item', style: TextStyle(fontWeight: FontWeight.w600)),
+      ),
+    );
   }
 
   Widget _buildFilters(List<String> categories, bool isWide, int lowStockCount) {
@@ -315,6 +325,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       case 'edit':
                         _showEditItemDialog(item);
                         break;
+                      case 'addStock':
+                        _showAddStockDialog(item);
+                        break;
                       case 'adjust':
                         _showAdjustStockDialog(item);
                         break;
@@ -332,6 +345,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       child: ListTile(
                         leading: Icon(Icons.edit),
                         title: Text('Edit'),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'addStock',
+                      child: ListTile(
+                        leading: Icon(Icons.add_circle),
+                        title: Text('Add Stock'),
                       ),
                     ),
                     const PopupMenuItem(
@@ -469,24 +489,142 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
+  void _showAddStockDialog(InventoryItem item) {
+    final quantityController = TextEditingController();
+    final staffNameController = TextEditingController();
+    final notesController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Add Stock - ${item.name}'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Current Stock: ${item.currentStock} ${item.unit}'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: quantityController,
+                decoration: const InputDecoration(
+                  labelText: 'Quantity to Add',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: false),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: staffNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Staff Name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: notesController,
+                decoration: const InputDecoration(
+                  labelText: 'Notes (Optional)',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final quantity = int.tryParse(quantityController.text);
+              final staffName = staffNameController.text.trim();
+
+              if (quantity == null || quantity <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid quantity')),
+                );
+                return;
+              }
+
+              if (staffName.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter staff name')),
+                );
+                return;
+              }
+
+              try {
+                // QA Requirement #9: Add Stock with logging
+                await InventoryManager.addStockWithLog(
+                  item.id,
+                  quantity,
+                  staffName,
+                  notesController.text.trim().isEmpty ? null : notesController.text.trim(),
+                );
+                await _loadData();
+                if (mounted) Navigator.pop(context);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Stock added successfully!')),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error adding stock: $e')),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.yellow.shade700,
+              foregroundColor: Colors.black87,
+            ),
+            child: const Text('Add Stock'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showAdjustStockDialog(InventoryItem item) {
     final stockController = TextEditingController(text: item.currentStock.toString());
+    final notesController = TextEditingController(); // QA Requirement #6
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Adjust Stock - ${item.name}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Current Stock: ${item.currentStock} ${item.unit}'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: stockController,
-              decoration: const InputDecoration(labelText: 'New Stock Amount'),
-              keyboardType: TextInputType.number,
-            ),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Current Stock: ${item.currentStock} ${item.unit}'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: stockController,
+                decoration: const InputDecoration(
+                  labelText: 'New Stock Amount',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+              // QA Requirement #6: Add Notes field
+              TextField(
+                controller: notesController,
+                decoration: const InputDecoration(
+                  labelText: 'Notes (Optional)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.note),
+                ),
+                maxLines: 3,
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -498,7 +636,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
               final newStock = int.tryParse(stockController.text);
               if (newStock != null) {
                 try {
-                  await InventoryManager.updateStock(item.id, newStock);
+                  // Use adjustStockWithLog to log the change with notes
+                  await InventoryManager.adjustStockWithLog(
+                    item.id,
+                    newStock,
+                    'Admin', // TODO: Get from auth
+                    notesController.text.trim().isEmpty ? null : notesController.text.trim(),
+                  );
                   await _loadData();
                   if (mounted) Navigator.pop(context);
                 } catch (e) {
@@ -531,6 +675,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ElevatedButton(
             onPressed: () async {
               try {
+                // QA Requirement #5: Add delete item logging to history
+                final log = InventoryLog(
+                  itemId: item.id,
+                  itemName: item.name,
+                  quantity: item.currentStock,
+                  staffName: 'Admin', // TODO: Get from auth
+                  action: 'delete',
+                  notes: 'Item deleted from inventory',
+                  timestamp: DateTime.now(),
+                  stockBefore: item.currentStock,
+                  stockAfter: 0,
+                );
+                await InventoryManager.addLog(log);
+
                 await InventoryManager.removeItem(item.id);
                 await _loadData();
                 if (mounted) Navigator.pop(context);
@@ -571,7 +729,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   labelText: 'Quantity to Withdraw',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: const TextInputType.numberWithOptions(decimal: false),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -705,6 +863,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               color: Colors.black87,
+                              fontSize: 16, // QA Requirement #8: Increased font size
                             ),
                           ),
                           subtitle: Column(
@@ -713,21 +872,30 @@ class _InventoryScreenState extends State<InventoryScreen> {
                               const SizedBox(height: 2),
                               Text(
                                 'Staff: ${log.staffName}',
-                                style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                                style: TextStyle(
+                                  color: Colors.black.withValues(alpha: 0.7),
+                                  fontSize: 15, // QA Requirement #8: Increased font size
+                                ),
                               ),
                               Text(
                                 '${log.stockBefore} → ${log.stockAfter} ${item.unit}',
-                                style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                                style: TextStyle(
+                                  color: Colors.black.withValues(alpha: 0.7),
+                                  fontSize: 15, // QA Requirement #8: Increased font size
+                                ),
                               ),
                               if (log.notes != null && log.notes!.isNotEmpty)
                                 Text(
                                   'Notes: ${log.notes}',
-                                  style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                                  style: TextStyle(
+                                    color: Colors.black.withValues(alpha: 0.7),
+                                    fontSize: 14, // QA Requirement #8: Increased font size
+                                  ),
                                 ),
                               Text(
                                 log.timestamp.toString().substring(0, 16),
                                 style: TextStyle(
-                                  fontSize: 12,
+                                  fontSize: 14, // QA Requirement #8: Increased font size (was 12)
                                   color: Colors.black.withValues(alpha: 0.5),
                                 ),
                               ),
@@ -760,6 +928,206 @@ class _InventoryScreenState extends State<InventoryScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => const InventoryLogHistoryScreen(),
+      ),
+    );
+  }
+
+  void _showAddItemDialog() {
+    final nameController = TextEditingController();
+    String selectedCategory = 'Cleaning Supplies';
+    String selectedUnit = 'bottles';
+    final minStockController = TextEditingController();
+    final initialStockController = TextEditingController();
+
+    // Predefined categories with 'Others' option (QA Requirement #2)
+    final predefinedCategories = [
+      'Cleaning Supplies',
+      'Wax & Polish',
+      'Equipment',
+      'Finishing Products',
+      'Others',
+    ];
+
+    // Predefined units (QA Requirement #3)
+    final predefinedUnits = [
+      'bottles',
+      'pieces',
+      'containers',
+      'liters',
+      'gallons',
+      'boxes',
+      'packs',
+    ];
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Add New Item', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: SizedBox(
+              width: 500,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Item Name
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Item Name *',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.inventory_2),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Category Dropdown (QA Requirement #2)
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedCategory,
+                      decoration: const InputDecoration(
+                        labelText: 'Category *',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.category),
+                      ),
+                      items: predefinedCategories
+                          .map((category) => DropdownMenuItem(
+                                value: category,
+                                child: Text(category),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setDialogState(() => selectedCategory = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Unit Dropdown (QA Requirement #3)
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedUnit,
+                      decoration: const InputDecoration(
+                        labelText: 'Unit *',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.straighten),
+                      ),
+                      items: predefinedUnits
+                          .map((unit) => DropdownMenuItem(
+                                value: unit,
+                                child: Text(unit),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setDialogState(() => selectedUnit = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Initial Stock and Min Stock Row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: initialStockController,
+                            decoration: const InputDecoration(
+                              labelText: 'Initial Stock *',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: minStockController,
+                            decoration: const InputDecoration(
+                              labelText: 'Min Stock *',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                      ],
+                    ),
+                    // Note: Unit Price field removed per QA Requirement #4
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  // Validation
+                  if (nameController.text.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Please enter item name')),
+                    );
+                    return;
+                  }
+
+                  final initialStock = int.tryParse(initialStockController.text.trim());
+                  if (initialStock == null || initialStock < 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Please enter valid initial stock')),
+                    );
+                    return;
+                  }
+
+                  final minStock = int.tryParse(minStockController.text.trim());
+                  if (minStock == null || minStock < 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Please enter valid minimum stock')),
+                    );
+                    return;
+                  }
+
+                  try {
+                    final newItem = InventoryItem(
+                      id: '', // Firestore will generate
+                      name: nameController.text.trim(),
+                      category: selectedCategory,
+                      currentStock: initialStock,
+                      minStock: minStock,
+                      unitPrice: 0.0, // Default to 0 as price is removed from UI
+                      unit: selectedUnit,
+                      lastUpdated: DateTime.now(),
+                    );
+
+                    await InventoryManager.addItem(newItem);
+                    await _loadData();
+                    if (mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Item added successfully'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error adding item: $e')),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.yellow.shade700,
+                  foregroundColor: Colors.black87,
+                ),
+                child: const Text('Add Item', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -881,6 +1249,7 @@ class _InventoryLogHistoryScreenState extends State<InventoryLogHistoryScreen> {
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             color: Colors.black87,
+                            fontSize: 17, // QA Requirement #8: Increased font size
                           ),
                         ),
                         subtitle: Column(
@@ -899,28 +1268,37 @@ class _InventoryLogHistoryScreenState extends State<InventoryLogHistoryScreen> {
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w600,
                                   color: Colors.black87,
-                                  fontSize: 12,
+                                  fontSize: 14, // QA Requirement #8: Increased font size (was 12)
                                 ),
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Staff: ${log.staffName}',
-                              style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                              style: TextStyle(
+                                color: Colors.black.withValues(alpha: 0.7),
+                                fontSize: 15, // QA Requirement #8: Increased font size
+                              ),
                             ),
                             Text(
                               '${log.stockBefore} → ${log.stockAfter}',
-                              style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                              style: TextStyle(
+                                color: Colors.black.withValues(alpha: 0.7),
+                                fontSize: 15, // QA Requirement #8: Increased font size
+                              ),
                             ),
                             if (log.notes != null && log.notes!.isNotEmpty)
                               Text(
                                 'Notes: ${log.notes}',
-                                style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                                style: TextStyle(
+                                  color: Colors.black.withValues(alpha: 0.7),
+                                  fontSize: 14, // QA Requirement #8: Increased font size
+                                ),
                               ),
                             Text(
                               log.timestamp.toString().substring(0, 16),
                               style: TextStyle(
-                                fontSize: 12,
+                                fontSize: 14, // QA Requirement #8: Increased font size (was 12)
                                 color: Colors.black.withValues(alpha: 0.5),
                               ),
                             ),

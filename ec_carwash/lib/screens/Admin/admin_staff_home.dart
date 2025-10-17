@@ -28,6 +28,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
   double _todayRevenue = 0.0;
   double _totalRevenue = 0.0;
   double _todayExpenses = 0.0;
+  double _todayPayrollCommission = 0.0; // Add payroll commission tracking
   int _pendingBookings = 0;
   List<Map<String, dynamic>> _recentTransactions = [];
   List<Map<String, dynamic>> _pendingBookingsList = [];
@@ -60,27 +61,37 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       final startOfDay = DateTime(today.year, today.month, today.day);
       final endOfDay = DateTime(today.year, today.month, today.day, 23, 59, 59);
 
-      // Load today's transactions
-      final transactionsSnapshot = await FirebaseFirestore.instance
+      // Load ALL today's transactions for accurate revenue and commission
+      final allTodayTransactionsSnapshot = await FirebaseFirestore.instance
           .collection('Transactions')
           .where('transactionAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
           .where('transactionAt', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
           .orderBy('transactionAt', descending: true)
-          .limit(5)
           .get();
 
       double todayRev = 0.0;
+      double todayCommission = 0.0;
       List<Map<String, dynamic>> recentTxns = [];
 
-      for (final doc in transactionsSnapshot.docs) {
+      for (int i = 0; i < allTodayTransactionsSnapshot.docs.length; i++) {
+        final doc = allTodayTransactionsSnapshot.docs[i];
         final data = doc.data();
         todayRev += (data['total'] as num?)?.toDouble() ?? 0.0;
-        recentTxns.add({
-          'id': doc.id,
-          'customer': data['customerName'] ?? 'Walk-in',
-          'amount': (data['total'] as num?)?.toDouble() ?? 0.0,
-          'time': (data['transactionAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-        });
+        todayCommission += (data['teamCommission'] as num?)?.toDouble() ?? 0.0;
+
+        // Only add first 5 to recent transactions list for display
+        if (i < 5) {
+          // Get customer name from customer object (unified structure)
+          final customerData = data['customer'] as Map<String, dynamic>?;
+          final customerName = customerData?['name'] ?? 'Walk-in';
+
+          recentTxns.add({
+            'id': doc.id,
+            'customer': customerName,
+            'amount': (data['total'] as num?)?.toDouble() ?? 0.0,
+            'time': (data['transactionAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          });
+        }
       }
 
       // Load all-time revenue
@@ -139,6 +150,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
           _todayRevenue = todayRev;
           _totalRevenue = totalRev;
           _todayExpenses = todayExp;
+          _todayPayrollCommission = todayCommission;
           _pendingBookings = pendingBookings.length;
           _pendingBookingsList = pendingBookings;
           _recentTransactions = recentTxns;
@@ -391,12 +403,35 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                         ),
                         child: Row(
                           children: [
-                            Icon(
-                              iconMap[title] ?? Icons.circle_outlined,
-                              color: isSelected
-                                  ? Colors.black
-                                  : Colors.grey.shade400,
-                              size: 22,
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Icon(
+                                  iconMap[title] ?? Icons.circle_outlined,
+                                  color: isSelected
+                                      ? Colors.black
+                                      : Colors.grey.shade400,
+                                  size: 22,
+                                ),
+                                // Red dot indicator for pending bookings on Scheduling
+                                if (title == "Scheduling" && _pendingBookings > 0)
+                                  Positioned(
+                                    right: -2,
+                                    top: -2,
+                                    child: Container(
+                                      width: 10,
+                                      height: 10,
+                                      decoration: BoxDecoration(
+                                        color: Colors.red,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                             const SizedBox(width: 12),
                             Text(
@@ -413,6 +448,25 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                                 letterSpacing: 0.2,
                               ),
                             ),
+                            // Badge with count for pending bookings
+                            if (title == "Scheduling" && _pendingBookings > 0) ...[
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  _pendingBookings.toString(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -553,14 +607,37 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                         ),
                         child: Row(
                           children: [
-                            Icon(
-                              isSelected
-                                  ? selectedIconMap[title] ?? Icons.circle
-                                  : iconMap[title] ?? Icons.circle_outlined,
-                              color: isSelected
-                                  ? Colors.black
-                                  : Colors.grey.shade400,
-                              size: 22,
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Icon(
+                                  isSelected
+                                      ? selectedIconMap[title] ?? Icons.circle
+                                      : iconMap[title] ?? Icons.circle_outlined,
+                                  color: isSelected
+                                      ? Colors.black
+                                      : Colors.grey.shade400,
+                                  size: 22,
+                                ),
+                                // Red dot indicator for pending bookings on Scheduling
+                                if (title == "Scheduling" && _pendingBookings > 0)
+                                  Positioned(
+                                    right: -2,
+                                    top: -2,
+                                    child: Container(
+                                      width: 10,
+                                      height: 10,
+                                      decoration: BoxDecoration(
+                                        color: Colors.red,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                             const SizedBox(width: 12),
                             Text(
@@ -577,6 +654,25 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                                 letterSpacing: 0.2,
                               ),
                             ),
+                            // Badge with count for pending bookings
+                            if (title == "Scheduling" && _pendingBookings > 0) ...[
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  _pendingBookings.toString(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -1001,7 +1097,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
 
   /// Net Profit Card
   Widget _buildNetProfitCard() {
-    final netProfit = _todayRevenue - _todayExpenses;
+    final netProfit = _todayRevenue - _todayExpenses - _todayPayrollCommission;
     final isPositive = netProfit >= 0;
 
     return Card(
@@ -1050,7 +1146,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                     ),
                   ),
                   Text(
-                    'Revenue: ₱${_todayRevenue.toStringAsFixed(2)} - Expenses: ₱${_todayExpenses.toStringAsFixed(2)}',
+                    'Revenue: ₱${_todayRevenue.toStringAsFixed(2)} - Expenses: ₱${_todayExpenses.toStringAsFixed(2)} - Payroll: ₱${_todayPayrollCommission.toStringAsFixed(2)}',
                     style: TextStyle(
                       fontSize: 13,
                       color: Colors.black.withValues(alpha: 0.6),

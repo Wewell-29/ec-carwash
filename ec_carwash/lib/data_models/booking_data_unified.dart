@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 /// Unified Booking Service structure (same as TransactionService)
 class BookingService {
@@ -77,6 +78,7 @@ class Booking {
 
   // Additional metadata
   final String? notes;
+  final bool autoCancelled;
 
   Booking({
     this.id,
@@ -99,6 +101,7 @@ class Booking {
     this.updatedAt,
     this.completedAt,
     this.notes,
+    this.autoCancelled = false,
   });
 
   double get totalAmount {
@@ -126,6 +129,7 @@ class Booking {
       'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
       'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : null,
       'notes': notes,
+      'autoCancelled': autoCancelled,
     };
   }
 
@@ -174,6 +178,7 @@ class Booking {
       updatedAt: (json['updatedAt'] as Timestamp?)?.toDate(),
       completedAt: (json['completedAt'] as Timestamp?)?.toDate(),
       notes: json['notes'],
+      autoCancelled: json['autoCancelled'] ?? false,
     );
   }
 
@@ -198,6 +203,7 @@ class Booking {
     DateTime? updatedAt,
     DateTime? completedAt,
     String? notes,
+    bool? autoCancelled,
   }) {
     return Booking(
       id: id ?? this.id,
@@ -220,6 +226,7 @@ class Booking {
       updatedAt: updatedAt ?? this.updatedAt,
       completedAt: completedAt ?? this.completedAt,
       notes: notes ?? this.notes,
+      autoCancelled: autoCancelled ?? this.autoCancelled,
     );
   }
 }
@@ -362,17 +369,40 @@ class BookingManager {
       final startOfDay = DateTime(today.year, today.month, today.day);
       final endOfDay = DateTime(today.year, today.month, today.day, 23, 59, 59);
 
-      final QuerySnapshot query = await _firestore
-          .collection(_collection)
-          .where('scheduledDateTime', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-          .where('scheduledDateTime', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
-          .orderBy('scheduledDateTime', descending: false)
-          .get();
+      QuerySnapshot query;
 
-      return query.docs.map((doc) {
+      try {
+        // Try with composite query (requires Firestore index)
+        query = await _firestore
+            .collection(_collection)
+            .where('scheduledDateTime', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+            .where('scheduledDateTime', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
+            .orderBy('scheduledDateTime', descending: false)
+            .get();
+      } catch (indexError) {
+        // Fallback: Get all bookings and filter in memory
+        debugPrint('Composite index not available, filtering in memory: $indexError');
+        query = await _firestore
+            .collection(_collection)
+            .get();
+      }
+
+      final bookings = query.docs.map((doc) {
         return Booking.fromJson(doc.data() as Map<String, dynamic>, doc.id);
       }).toList();
+
+      // Filter for today if we got all bookings
+      final todayBookings = bookings.where((booking) {
+        return booking.scheduledDateTime.isAfter(startOfDay) &&
+               booking.scheduledDateTime.isBefore(endOfDay.add(Duration(seconds: 1)));
+      }).toList();
+
+      // Sort by scheduled time
+      todayBookings.sort((a, b) => a.scheduledDateTime.compareTo(b.scheduledDateTime));
+
+      return todayBookings;
     } catch (e) {
+      debugPrint('Failed to get today\'s bookings: $e');
       throw Exception('Failed to get today\'s bookings: $e');
     }
   }

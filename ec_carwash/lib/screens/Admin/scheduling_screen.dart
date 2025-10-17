@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:ec_carwash/data_models/booking_data_unified.dart';
 import 'package:ec_carwash/data_models/relationship_manager.dart';
@@ -18,17 +19,108 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
   List<Booking> _cancelledBookings = [];
   bool _isLoading = true;
   String _selectedFilter = 'today'; // all, today
+  Timer? _autoCancelTimer;
 
   @override
   void initState() {
     super.initState();
+    _debugCheckBookings(); // Debug: Check what bookings exist
     _loadBookings();
     _fixExistingPOSBookingsPaymentStatus(); // Fix existing POS bookings
+    _startAutoCancelTimer(); // Start auto-cancel timer
+  }
+
+  /// Debug function to check what bookings exist in Firestore
+  Future<void> _debugCheckBookings() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .limit(5)
+          .get();
+
+      debugPrint('🔍 DEBUG: Total bookings in Firestore: ${snapshot.docs.length}');
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        debugPrint('  📄 Booking ${doc.id}:');
+        debugPrint('    - hasScheduledDateTime: ${data.containsKey('scheduledDateTime')}');
+        debugPrint('    - hasSelectedDateTime: ${data.containsKey('selectedDateTime')}');
+        debugPrint('    - status: ${data['status']}');
+        debugPrint('    - source: ${data['source']}');
+        debugPrint('    - userName: ${data['userName']}');
+        if (data.containsKey('scheduledDateTime')) {
+          debugPrint('    - scheduledDateTime: ${(data['scheduledDateTime'] as Timestamp).toDate()}');
+        }
+        if (data.containsKey('selectedDateTime')) {
+          debugPrint('    - selectedDateTime: ${(data['selectedDateTime'] as Timestamp).toDate()}');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Debug check failed: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _autoCancelTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Start a timer that checks for bookings to auto-cancel every 5 minutes
+  void _startAutoCancelTimer() {
+    _autoCancelTimer = Timer.periodic(const Duration(minutes: 5), (timer) {
+      _autoCheckAndCancelExpiredBookings();
+    });
+    // Also run it once immediately
+    _autoCheckAndCancelExpiredBookings();
+  }
+
+  /// Auto-cancel approved/pending bookings from mobile app after 30 minutes if not paid/assigned
+  Future<void> _autoCheckAndCancelExpiredBookings() async {
+    try {
+      final now = DateTime.now();
+
+      // Query approved and pending bookings from customer app (not POS)
+      final snapshot = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('source', isEqualTo: 'customer-app')
+          .where('status', whereIn: ['pending', 'approved'])
+          .get();
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final scheduledDateTime = (data['scheduledDateTime'] as Timestamp?)?.toDate();
+        final paymentStatus = data['paymentStatus'] ?? 'pending';
+
+        if (scheduledDateTime != null) {
+          final timeDifference = now.difference(scheduledDateTime);
+
+          // Auto-cancel if more than 30 minutes past scheduled time and not paid
+          if (timeDifference.inMinutes >= 30 && paymentStatus != 'paid') {
+            await doc.reference.update({
+              'status': 'cancelled',
+              'cancelReason': 'Auto-cancelled: No show after 30 minutes',
+              'cancelledAt': FieldValue.serverTimestamp(),
+              'autoCancelled': true,
+            });
+
+            debugPrint('Auto-cancelled booking ${doc.id} - ${timeDifference.inMinutes} minutes past scheduled time');
+          }
+        }
+      }
+
+      // Reload bookings to reflect changes
+      if (mounted) {
+        _loadBookings();
+      }
+    } catch (e) {
+      debugPrint('Error in auto-cancel check: $e');
+    }
   }
 
   Future<void> _loadBookings() async {
     setState(() => _isLoading = true);
     try {
+      debugPrint('🔍 Loading bookings with filter: $_selectedFilter');
       List<Booking> allBookings = [];
       if (_selectedFilter == 'today') {
         allBookings = await BookingManager.getTodayBookings();
@@ -36,6 +128,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         allBookings = await BookingManager.getAllBookings();
       }
 
+      debugPrint('📊 Total bookings loaded: ${allBookings.length}');
+      for (var booking in allBookings) {
+        debugPrint('  - ${booking.status}: ${booking.userName} (${booking.source}) - ${booking.scheduledDateTime}');
+      }
 
       // Separate bookings by status for Kanban columns
       setState(() {
@@ -44,8 +140,11 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         _completedBookings = allBookings.where((b) => b.status == 'completed').toList();
         _cancelledBookings = allBookings.where((b) => b.status == 'cancelled').toList();
         _isLoading = false;
+
+        debugPrint('✅ Pending: ${_pendingBookings.length}, Approved: ${_approvedBookings.length}, Completed: ${_completedBookings.length}, Cancelled: ${_cancelledBookings.length}');
       });
     } catch (e) {
+      debugPrint('❌ Error loading bookings: $e');
       setState(() {
         _pendingBookings = [];
         _approvedBookings = [];
@@ -899,6 +998,36 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                             color: booking.assignedTeam == 'Team A'
                                 ? Colors.indigo.shade700
                                 : Colors.teal.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                // Auto-cancelled indicator
+                if (booking.status == 'cancelled' && booking.autoCancelled)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade100,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.orange.shade400),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.access_time,
+                          size: 12,
+                          color: Colors.orange.shade700,
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          'AUTO',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade700,
                           ),
                         ),
                       ],

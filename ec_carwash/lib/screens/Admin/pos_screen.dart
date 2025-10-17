@@ -151,7 +151,7 @@ class _POSScreenState extends State<POSScreen> {
                 ),
               ],
             ),
-            backgroundColor: Colors.blue.shade700,
+            backgroundColor: Colors.yellow.shade700,
             duration: const Duration(seconds: 2),
           ),
         );
@@ -428,7 +428,7 @@ class _POSScreenState extends State<POSScreen> {
                 final vehicleType = entry.key;
                 final price = (entry.value as num).toDouble();
                 IconData icon = Icons.directions_car;
-                Color color = Colors.blue;
+                Color color = Colors.yellow.shade700;
 
                 if (vehicleType.contains('Motorcycle')) {
                   icon = Icons.motorcycle;
@@ -833,13 +833,13 @@ class _POSScreenState extends State<POSScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: Colors.blue.shade100,
+                                          color: Colors.yellow.shade100,
                                           borderRadius: BorderRadius.circular(4),
                                         ),
                                         child: Text(
                                           _vehicleTypeForCustomer!,
                                           style: TextStyle(
-                                            color: Colors.blue.shade700,
+                                            color: Colors.black87,
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600,
                                           ),
@@ -898,7 +898,7 @@ class _POSScreenState extends State<POSScreen> {
                         decoration: InputDecoration(
                           labelText: "Search by Plate or Name",
                           hintText: "e.g. ABC1234 or John Doe (Press Enter to search)",
-                          prefixIcon: Icon(Icons.search, color: Colors.blue.shade600),
+                          prefixIcon: Icon(Icons.search, color: Colors.black87),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -908,7 +908,7 @@ class _POSScreenState extends State<POSScreen> {
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.blue.shade600, width: 2),
+                            borderSide: BorderSide(color: Colors.yellow.shade700, width: 2),
                           ),
                           filled: true,
                           fillColor: Colors.grey.shade50,
@@ -1002,7 +1002,7 @@ class _POSScreenState extends State<POSScreen> {
                 decoration: InputDecoration(
                   labelText: "Plate Number *",
                   hintText: "e.g. ABC1234",
-                  prefixIcon: Icon(Icons.directions_car, color: Colors.blue.shade600),
+                  prefixIcon: Icon(Icons.directions_car, color: Colors.black87),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1027,7 +1027,7 @@ class _POSScreenState extends State<POSScreen> {
                 decoration: InputDecoration(
                   labelText: "Customer Name *",
                   hintText: "e.g. John Doe",
-                  prefixIcon: Icon(Icons.person, color: Colors.blue.shade600),
+                  prefixIcon: Icon(Icons.person, color: Colors.black87),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1051,7 +1051,7 @@ class _POSScreenState extends State<POSScreen> {
                 decoration: InputDecoration(
                   labelText: "Email (Optional)",
                   hintText: "e.g. john@example.com",
-                  prefixIcon: Icon(Icons.email, color: Colors.blue.shade600),
+                  prefixIcon: Icon(Icons.email, color: Colors.black87),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1076,7 +1076,7 @@ class _POSScreenState extends State<POSScreen> {
                 decoration: InputDecoration(
                   labelText: "Contact Number (Optional)",
                   hintText: "e.g. +63 912 345 6789",
-                  prefixIcon: Icon(Icons.phone, color: Colors.blue.shade600),
+                  prefixIcon: Icon(Icons.phone, color: Colors.black87),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1101,7 +1101,7 @@ class _POSScreenState extends State<POSScreen> {
                 decoration: InputDecoration(
                   labelText: "Vehicle Type (Optional)",
                   hintText: "Select vehicle type",
-                  prefixIcon: Icon(Icons.directions_car, color: Colors.blue.shade600),
+                  prefixIcon: Icon(Icons.directions_car, color: Colors.black87),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1154,7 +1154,7 @@ class _POSScreenState extends State<POSScreen> {
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      Colors.blue.shade50,
+                      Colors.yellow.shade50,
                       Colors.white,
                     ],
                   ),
@@ -1376,6 +1376,29 @@ class _POSScreenState extends State<POSScreen> {
                         initialTime: _selectedTime,
                       );
                       if (picked != null) {
+                        // Prevent selecting past time
+                        final now = DateTime.now();
+                        final selectedDateTime = DateTime(
+                          now.year,
+                          now.month,
+                          now.day,
+                          picked.hour,
+                          picked.minute,
+                        );
+
+                        // Check if selected time is in the past
+                        if (selectedDateTime.isBefore(now)) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: const Text('Cannot select past time'),
+                                backgroundColor: Colors.red.shade700,
+                              ),
+                            );
+                          }
+                          return;
+                        }
+
                         setState(() => _selectedTime = picked);
                       }
                     },
@@ -2074,10 +2097,18 @@ class _POSScreenState extends State<POSScreen> {
         assignedTeam: assignedTeam,
       );
 
-      // Clear cart after successful transaction
+      // Clear cart and reset customer after successful transaction
       if (mounted) {
         setState(() {
           cart.clear();
+          currentCustomer = null;
+          _currentCustomerId = null;
+          _vehicleTypeForCustomer = null;
+          _selectedVehicleType = null;
+          nameController.clear();
+          plateController.clear();
+          phoneController.clear();
+          emailController.clear();
         });
       }
     } catch (e) {
@@ -2099,24 +2130,20 @@ class _POSScreenState extends State<POSScreen> {
     String? assignedTeam,
   }) async {
     try {
-      // Follow the customer app booking structure:
-      // - selectedDateTime (Timestamp)
-      // - date (ISO)
-      // - time (formatted string)
-      // - services (same array)
+      // Use unified booking structure with scheduledDateTime (not selectedDateTime)
       final bookingData = {
         "userId": customerMap["id"] ?? "",
         "userEmail": customerMap["email"] ?? "",
         "userName": customerMap["name"] ?? "",
         "plateNumber": customerMap["plateNumber"] ?? "",
         "contactNumber": customerMap["contactNumber"] ?? "",
+        "vehicleType": customerMap["vehicleType"],
 
-        "selectedDateTime": Timestamp.fromDate(txnDateTime),
-        "date": txnDateTime.toIso8601String(),
-        "time": "${txnDateTime.hour.toString().padLeft(2, '0')}:${txnDateTime.minute.toString().padLeft(2, '0')}",
+        // 🔑 UNIFIED FIELD: scheduledDateTime (for Firestore queries to work)
+        "scheduledDateTime": Timestamp.fromDate(txnDateTime),
 
         "services": services, // 🔑 unified key
-        "total": totalAmount,
+        "totalAmount": totalAmount, // Use totalAmount for consistency
 
         "status": "approved",
         "paymentStatus": "paid", // POS transactions are already paid
