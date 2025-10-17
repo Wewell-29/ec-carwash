@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'notification_data.dart';
 
 /// Unified Booking Service structure (same as TransactionService)
 class BookingService {
@@ -314,10 +315,64 @@ class BookingManager {
   /// Update booking status
   static Future<void> updateBookingStatus(String bookingId, String status) async {
     try {
+      // Get the booking details first to retrieve user information
+      final bookingDoc = await _firestore.collection(_collection).doc(bookingId).get();
+
+      if (!bookingDoc.exists) {
+        throw Exception('Booking not found');
+      }
+
+      final bookingData = bookingDoc.data() as Map<String, dynamic>;
+      final userEmail = bookingData['userEmail'] as String?;
+
+      // Update the booking status
       await _firestore.collection(_collection).doc(bookingId).update({
         'status': status,
         'updatedAt': FieldValue.serverTimestamp(),
       });
+
+      // Create in-app notification for the customer
+      if (userEmail != null && userEmail.isNotEmpty) {
+        String notificationTitle = '';
+        String notificationMessage = '';
+        String notificationType = '';
+
+        switch (status) {
+          case 'approved':
+            notificationTitle = 'Booking Confirmed!';
+            notificationMessage = 'Your booking has been approved. We look forward to serving you!';
+            notificationType = 'booking_approved';
+            break;
+          case 'in-progress':
+            notificationTitle = 'Service Started';
+            notificationMessage = 'Your vehicle service is now in progress.';
+            notificationType = 'booking_in_progress';
+            break;
+          case 'completed':
+            notificationTitle = 'Service Completed';
+            notificationMessage = 'Your vehicle service has been completed. Thank you for choosing EC Carwash!';
+            notificationType = 'booking_completed';
+            break;
+          case 'cancelled':
+            notificationTitle = 'Booking Cancelled';
+            notificationMessage = 'Your booking has been cancelled.';
+            notificationType = 'booking_cancelled';
+            break;
+        }
+
+        if (notificationTitle.isNotEmpty) {
+          await NotificationManager.createNotification(
+            userId: userEmail,
+            title: notificationTitle,
+            message: notificationMessage,
+            type: notificationType,
+            metadata: {
+              'bookingId': bookingId,
+              'status': status,
+            },
+          );
+        }
+      }
     } catch (e) {
       throw Exception('Failed to update booking status: $e');
     }

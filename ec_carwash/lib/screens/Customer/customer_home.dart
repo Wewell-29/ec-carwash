@@ -6,6 +6,7 @@ import 'book_service_screen.dart';
 import 'booking_history.dart';
 import 'account_info_screen.dart';
 import 'notifications_screen.dart';
+import '../../services/fcm_token_manager.dart';
 
 class CustomerHome extends StatefulWidget {
   const CustomerHome({super.key});
@@ -16,6 +17,22 @@ class CustomerHome extends StatefulWidget {
 
 class _CustomerHomeState extends State<CustomerHome> {
   String _selectedMenu = "Home";
+
+  @override
+  void initState() {
+    super.initState();
+    // Ensure FCM token is saved/refreshed when customer opens the app
+    _initializeNotifications();
+  }
+
+  Future<void> _initializeNotifications() async {
+    try {
+      await FCMTokenManager.initializeToken();
+    } catch (e) {
+      // Silently fail - notification setup is not critical
+      debugPrint('Failed to initialize notifications: $e');
+    }
+  }
 
   void _onSelect(String menu) {
     setState(() => _selectedMenu = menu);

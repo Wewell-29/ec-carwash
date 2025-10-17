@@ -7,6 +7,9 @@ import 'screens/Admin/admin_staff_home.dart';
 import 'screens/Customer/customer_home.dart';
 import 'data_models/inventory_data.dart';
 import 'data_models/services_data.dart';
+import 'services/local_notification_service.dart';
+import 'services/firebase_messaging_service.dart';
+import 'services/fcm_token_manager.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 
@@ -21,6 +24,13 @@ void main() async {
 
   // Initialize services data if Firestore collection is empty
   await ServicesManager.initializeWithSampleData();
+
+  // Initialize notification services (only for mobile platforms)
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    await LocalNotificationService.initialize();
+    await FirebaseMessagingService.initialize();
+    await FCMTokenManager.initializeToken();
+  }
 
   runApp(const ECCarwashApp());
 }
