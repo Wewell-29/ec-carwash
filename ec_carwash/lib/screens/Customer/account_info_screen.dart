@@ -106,6 +106,98 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
     }
   }
 
+  Future<void> _showMotorcycleCategoryDialog() async {
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text(
+            'Motorcycle Categories',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Small Motorcycles',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildMotorcycleList([
+                  'Honda TMX Supremo',
+                  'Kawasaki Barako II',
+                  'Suzuki Smash',
+                  'Honda CRF150L',
+                  'Kawasaki KLX150',
+                  'Yamaha WR155R',
+                ]),
+                const SizedBox(height: 20),
+                const Text(
+                  'Large Motorcycles',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildMotorcycleList([
+                  'Yamaha R15 / R3',
+                  'Mio Aerox',
+                  'Kawasaki Ninja 400',
+                  'Honda CBR150R',
+                  'Honda ADV 160',
+                  'Yamaha NMAX / XMAX',
+                  'Kawasaki Versys',
+                  'Honda Click 125i / 160',
+                ]),
+              ],
+            ),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.yellow[700],
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMotorcycleList(List<String> motorcycles) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: motorcycles.map((motorcycle) {
+        return Padding(
+          padding: const EdgeInsets.only(left: 8, bottom: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('• ', style: TextStyle(fontSize: 16)),
+              Expanded(
+                child: Text(
+                  motorcycle,
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   Future<void> _showAddVehicleDialog() async {
     final plateController = TextEditingController();
     final contactController = TextEditingController();
@@ -193,19 +285,33 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                       keyboardType: TextInputType.phone,
                     ),
                     const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(
-                        labelText: 'Vehicle Type *',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: _availableVehicleTypes.map((type) {
-                        return DropdownMenuItem(value: type, child: Text(type));
-                      }).toList(),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedVehicleType = value;
-                        });
-                      },
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            decoration: const InputDecoration(
+                              labelText: 'Vehicle Type *',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: _availableVehicleTypes.map((type) {
+                              return DropdownMenuItem(
+                                value: type,
+                                child: Text(type),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setDialogState(() {
+                                selectedVehicleType = value;
+                              });
+                              // Show motorcycle category dialog if a motorcycle type is selected
+                              if (value != null &&
+                                  value.toLowerCase().contains('motor')) {
+                                _showMotorcycleCategoryDialog();
+                              }
+                            },
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
