@@ -6,6 +6,8 @@ import 'package:intl/intl.dart';
 // Navigate to these
 import 'book_service_screen.dart';
 import 'customer_home.dart';
+import 'account_info_screen.dart';
+import 'notifications_screen.dart';
 
 class BookingHistoryScreen extends StatefulWidget {
   const BookingHistoryScreen({super.key});
@@ -33,6 +35,16 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
       );
     } else if (menu == "History") {
       // already here — do nothing
+    } else if (menu == "Notifications") {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+      );
+    } else if (menu == "Account") {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const AccountInfoScreen()),
+      );
     }
   }
 
@@ -53,6 +65,40 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
     } catch (_) {
       return rawScheduledDateTime.toString();
     }
+  }
+
+  void _rebookTransaction(Map<String, dynamic> transactionData) {
+    // Extract the customer info and services from the completed transaction
+    final customer = (transactionData['customer'] as Map<String, dynamic>?) ?? {};
+    final plateNumber = customer['plateNumber'] as String?;
+
+    // Get the services from the transaction
+    final rawList = (transactionData['services'] ?? transactionData['items']) as List<dynamic>? ?? [];
+    final services = rawList.cast<Map<String, dynamic>>();
+
+    if (plateNumber == null || services.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to rebook: Missing vehicle or service information'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Navigate to the booking screen with the rebook data
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BookServiceScreen(
+          rebookData: {
+            'plateNumber': plateNumber,
+            'services': services,
+            'customer': customer,
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -111,6 +157,20 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
                 selected: _selectedMenu == "History",
                 selectedTileColor: Colors.yellow[100],
                 onTap: () => _onSelect("History"),
+              ),
+              ListTile(
+                leading: const Icon(Icons.notifications),
+                title: const Text("Notifications"),
+                selected: _selectedMenu == "Notifications",
+                selectedTileColor: Colors.yellow[100],
+                onTap: () => _onSelect("Notifications"),
+              ),
+              ListTile(
+                leading: const Icon(Icons.account_circle),
+                title: const Text("Account"),
+                selected: _selectedMenu == "Account",
+                selectedTileColor: Colors.yellow[100],
+                onTap: () => _onSelect("Account"),
               ),
               const Divider(),
               ListTile(
@@ -196,28 +256,49 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: ListTile(
-                title: Text('Plate: $plate'),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Date: $formattedDateTime'),
-                    const SizedBox(height: 4),
-                    Text('Services: $servicesLabel'),
-                    const SizedBox(height: 4),
-                    Text('Total: ₱$total'),
-                  ],
-                ),
-                trailing: const Chip(
-                  label: Text(
-                    'COMPLETED',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+              child: Column(
+                children: [
+                  ListTile(
+                    title: Text('Plate: $plate'),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Date: $formattedDateTime'),
+                        const SizedBox(height: 4),
+                        Text('Services: $servicesLabel'),
+                        const SizedBox(height: 4),
+                        Text('Total: ₱$total'),
+                      ],
+                    ),
+                    trailing: const Chip(
+                      label: Text(
+                        'COMPLETED',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      backgroundColor: Colors.green,
                     ),
                   ),
-                  backgroundColor: Colors.green,
-                ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () => _rebookTransaction(data),
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text('Rebook'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.yellow[700],
+                            foregroundColor: Colors.black,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             );
           },
