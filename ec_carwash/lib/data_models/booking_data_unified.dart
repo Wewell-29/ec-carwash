@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'notification_data.dart';
+import 'package:flutter/foundation.dart';
 
 /// Unified Booking Service structure (same as TransactionService)
 class BookingService {
@@ -60,7 +60,8 @@ class Booking {
   final List<BookingService> services;
 
   // Status tracking
-  final String status; // 'pending', 'approved', 'in-progress', 'completed', 'cancelled'
+  final String
+  status; // 'pending', 'approved', 'in-progress', 'completed', 'cancelled'
   final String paymentStatus; // 'unpaid', 'paid', 'refunded'
 
   // Source and relationships
@@ -78,6 +79,7 @@ class Booking {
 
   // Additional metadata
   final String? notes;
+  final bool autoCancelled;
 
   Booking({
     this.id,
@@ -100,10 +102,14 @@ class Booking {
     this.updatedAt,
     this.completedAt,
     this.notes,
+    this.autoCancelled = false,
   });
 
   double get totalAmount {
-    return services.fold<double>(0.0, (total, service) => total + (service.price * service.quantity));
+    return services.fold<double>(
+      0.0,
+      (total, service) => total + (service.price * service.quantity),
+    );
   }
 
   Map<String, dynamic> toJson() {
@@ -125,8 +131,11 @@ class Booking {
       'teamCommission': teamCommission,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
-      'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : null,
+      'completedAt': completedAt != null
+          ? Timestamp.fromDate(completedAt!)
+          : null,
       'notes': notes,
+      'autoCancelled': autoCancelled,
     };
   }
 
@@ -175,6 +184,7 @@ class Booking {
       updatedAt: (json['updatedAt'] as Timestamp?)?.toDate(),
       completedAt: (json['completedAt'] as Timestamp?)?.toDate(),
       notes: json['notes'],
+      autoCancelled: json['autoCancelled'] ?? false,
     );
   }
 
@@ -199,6 +209,7 @@ class Booking {
     DateTime? updatedAt,
     DateTime? completedAt,
     String? notes,
+    bool? autoCancelled,
   }) {
     return Booking(
       id: id ?? this.id,
@@ -221,6 +232,7 @@ class Booking {
       updatedAt: updatedAt ?? this.updatedAt,
       completedAt: completedAt ?? this.completedAt,
       notes: notes ?? this.notes,
+      autoCancelled: autoCancelled ?? this.autoCancelled,
     );
   }
 }
@@ -270,7 +282,9 @@ class BookingManager {
       }).toList();
 
       // Sort in memory to avoid composite index requirement
-      bookings.sort((a, b) => a.scheduledDateTime.compareTo(b.scheduledDateTime));
+      bookings.sort(
+        (a, b) => a.scheduledDateTime.compareTo(b.scheduledDateTime),
+      );
 
       return bookings;
     } catch (e) {
@@ -313,10 +327,16 @@ class BookingManager {
   }
 
   /// Update booking status
-  static Future<void> updateBookingStatus(String bookingId, String status) async {
+  static Future<void> updateBookingStatus(
+    String bookingId,
+    String status,
+  ) async {
     try {
       // Get the booking details first to retrieve user information
-      final bookingDoc = await _firestore.collection(_collection).doc(bookingId).get();
+      final bookingDoc = await _firestore
+          .collection(_collection)
+          .doc(bookingId)
+          .get();
 
       if (!bookingDoc.exists) {
         throw Exception('Booking not found');
@@ -340,7 +360,8 @@ class BookingManager {
         switch (status) {
           case 'approved':
             notificationTitle = 'Booking Confirmed!';
-            notificationMessage = 'Your booking has been approved. We look forward to serving you!';
+            notificationMessage =
+                'Your booking has been approved. We look forward to serving you!';
             notificationType = 'booking_approved';
             break;
           case 'in-progress':
@@ -350,7 +371,8 @@ class BookingManager {
             break;
           case 'completed':
             notificationTitle = 'Service Completed';
-            notificationMessage = 'Your vehicle service has been completed. Thank you for choosing EC Carwash!';
+            notificationMessage =
+                'Your vehicle service has been completed. Thank you for choosing EC Carwash!';
             notificationType = 'booking_completed';
             break;
           case 'cancelled':
@@ -366,10 +388,7 @@ class BookingManager {
             title: notificationTitle,
             message: notificationMessage,
             type: notificationType,
-            metadata: {
-              'bookingId': bookingId,
-              'status': status,
-            },
+            metadata: {'bookingId': bookingId, 'status': status},
           );
         }
       }
@@ -399,7 +418,10 @@ class BookingManager {
   }
 
   /// Reschedule booking
-  static Future<void> rescheduleBooking(String bookingId, DateTime newDateTime) async {
+  static Future<void> rescheduleBooking(
+    String bookingId,
+    DateTime newDateTime,
+  ) async {
     try {
       await _firestore.collection(_collection).doc(bookingId).update({
         'scheduledDateTime': Timestamp.fromDate(newDateTime),
@@ -417,17 +439,50 @@ class BookingManager {
       final startOfDay = DateTime(today.year, today.month, today.day);
       final endOfDay = DateTime(today.year, today.month, today.day, 23, 59, 59);
 
-      final QuerySnapshot query = await _firestore
-          .collection(_collection)
-          .where('scheduledDateTime', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-          .where('scheduledDateTime', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
-          .orderBy('scheduledDateTime', descending: false)
-          .get();
+      QuerySnapshot query;
 
-      return query.docs.map((doc) {
+      try {
+        // Try with composite query (requires Firestore index)
+        query = await _firestore
+            .collection(_collection)
+            .where(
+              'scheduledDateTime',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+            )
+            .where(
+              'scheduledDateTime',
+              isLessThanOrEqualTo: Timestamp.fromDate(endOfDay),
+            )
+            .orderBy('scheduledDateTime', descending: false)
+            .get();
+      } catch (indexError) {
+        // Fallback: Get all bookings and filter in memory
+        debugPrint(
+          'Composite index not available, filtering in memory: $indexError',
+        );
+        query = await _firestore.collection(_collection).get();
+      }
+
+      final bookings = query.docs.map((doc) {
         return Booking.fromJson(doc.data() as Map<String, dynamic>, doc.id);
       }).toList();
+
+      // Filter for today if we got all bookings
+      final todayBookings = bookings.where((booking) {
+        return booking.scheduledDateTime.isAfter(startOfDay) &&
+            booking.scheduledDateTime.isBefore(
+              endOfDay.add(Duration(seconds: 1)),
+            );
+      }).toList();
+
+      // Sort by scheduled time
+      todayBookings.sort(
+        (a, b) => a.scheduledDateTime.compareTo(b.scheduledDateTime),
+      );
+
+      return todayBookings;
     } catch (e) {
+      debugPrint('Failed to get today\'s bookings: $e');
       throw Exception('Failed to get today\'s bookings: $e');
     }
   }

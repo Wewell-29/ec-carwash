@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:ec_carwash/data_models/expense_data.dart';
-import 'package:ec_carwash/data_models/inventory_data.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 class ExpensesScreen extends StatefulWidget {
   const ExpensesScreen({super.key});
@@ -171,6 +173,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               const SizedBox(width: 8),
               _buildCategoryChip('Misc', 'Miscellaneous'),
               const Spacer(),
+              // QA Requirement #10: Print Data History button
+              OutlinedButton.icon(
+                onPressed: _expenses.isEmpty ? null : _printExpenseHistory,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.black87,
+                  backgroundColor: Colors.yellow.shade50,
+                  side: const BorderSide(color: Colors.black87, width: 1.5),
+                ),
+                icon: const Icon(Icons.print, size: 18),
+                label: const Text('Print History'),
+              ),
+              const SizedBox(width: 12),
               OutlinedButton.icon(
                 onPressed: _loadExpenses,
                 style: OutlinedButton.styleFrom(
@@ -386,21 +400,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   ),
                   const SizedBox(height: 8),
                 ],
-                if (expense.inventoryItemName != null && expense.inventoryItemName!.isNotEmpty) ...[
-                  Row(
-                    children: [
-                      const Icon(Icons.link, size: 16, color: Colors.blue),
-                      const SizedBox(width: 4),
-                      const Text(
-                        'Linked to Inventory:',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(expense.inventoryItemName!, style: const TextStyle(fontSize: 14)),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                ],
                 if (expense.notes != null && expense.notes!.isNotEmpty) ...[
                   const Text(
                     'Notes:',
@@ -433,8 +432,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     final quantityController = TextEditingController();
     final vendorController = TextEditingController();
     final notesController = TextEditingController();
-    InventoryItem? selectedInventoryItem;
-    List<InventoryItem> inventoryItems = [];
 
     showDialog(
       context: context,
@@ -486,45 +483,13 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                 child: Text(category),
                               ))
                           .toList(),
-                      onChanged: (value) async {
+                      onChanged: (value) {
                         if (value != null) {
-                          setDialogState(() {
-                            selectedCategory = value;
-                            selectedInventoryItem = null;
-                          });
-
-                          // Load inventory items if Supplies selected
-                          if (value == 'Supplies') {
-                            final items = await InventoryManager.getItems();
-                            setDialogState(() => inventoryItems = items);
-                          }
+                          setDialogState(() => selectedCategory = value);
                         }
                       },
                     ),
                     const SizedBox(height: 16),
-
-                    // Inventory Item Dropdown (only for Supplies)
-                    if (selectedCategory == 'Supplies') ...[
-                      DropdownButtonFormField<InventoryItem>(
-                        initialValue: selectedInventoryItem,
-                        decoration: const InputDecoration(
-                          labelText: 'Link to Inventory Item',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.inventory_2),
-                          helperText: 'Stock will be auto-added when expense is saved',
-                        ),
-                        items: inventoryItems
-                            .map((item) => DropdownMenuItem(
-                                  value: item,
-                                  child: Text('${item.name} (Current: ${item.currentStock})'),
-                                ))
-                            .toList(),
-                        onChanged: (value) {
-                          setDialogState(() => selectedInventoryItem = value);
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                    ],
 
                     // Description
                     TextField(
@@ -633,35 +598,17 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       notes: notesController.text.trim().isNotEmpty
                           ? notesController.text.trim()
                           : null,
-                      inventoryItemId: selectedInventoryItem?.id,
-                      inventoryItemName: selectedInventoryItem?.name,
                       addedBy: 'Admin', // TODO: Get from auth
                       createdAt: DateTime.now(),
                     );
 
                     await ExpenseManager.addExpense(expense);
-
-                    // Auto-restock inventory if Supplies and item selected
-                    String message = 'Expense added successfully';
-                    if (selectedCategory == 'Supplies' &&
-                        selectedInventoryItem != null &&
-                        quantity != null &&
-                        quantity > 0) {
-                      await InventoryManager.addStockWithLog(
-                        selectedInventoryItem!.id,
-                        quantity,
-                        'Admin', // TODO: Get from auth
-                        'Auto-restocked from expense: ${descriptionController.text.trim()}',
-                      );
-                      message = 'Expense added and ${selectedInventoryItem!.name} restocked (+$quantity)';
-                    }
-
                     await _loadExpenses();
                     if (mounted) {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(message),
+                        const SnackBar(
+                          content: Text('Expense added successfully'),
                           backgroundColor: Colors.green,
                         ),
                       );
@@ -683,6 +630,126 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  // QA Requirement #10: Print Data History functionality
+  Future<void> _printExpenseHistory() async {
+    try {
+      final pdf = pw.Document();
+
+      // Calculate total
+      final totalExpenses = _expenses.fold<double>(0.0, (total, expense) => total + expense.amount);
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          build: (pw.Context context) {
+            return [
+              // Header
+              pw.Header(
+                level: 0,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'EC CARWASH',
+                      style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+                    ),
+                    pw.Text(
+                      'Balayan Batangas',
+                      style: const pw.TextStyle(fontSize: 14),
+                    ),
+                    pw.SizedBox(height: 8),
+                    pw.Divider(thickness: 2),
+                    pw.SizedBox(height: 8),
+                    pw.Text(
+                      'EXPENSE HISTORY',
+                      style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
+                    ),
+                    pw.SizedBox(height: 8),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Text('Category: $_selectedCategory'),
+                        pw.Text('Filter: $_selectedFilter'),
+                      ],
+                    ),
+                    pw.Text('Generated: ${DateFormat('MMM dd, yyyy HH:mm').format(DateTime.now())}'),
+                    pw.SizedBox(height: 8),
+                    pw.Text(
+                      'Total: P${totalExpenses.toStringAsFixed(2)}',
+                      style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 16),
+
+              // Expense Table
+              pw.Table(
+                border: pw.TableBorder.all(),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1),
+                  1: const pw.FlexColumnWidth(2),
+                  2: const pw.FlexColumnWidth(1.5),
+                  3: const pw.FlexColumnWidth(1.2),
+                  4: const pw.FlexColumnWidth(1),
+                },
+                children: [
+                  // Header Row
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                    children: [
+                      _buildTableCell('Date', isHeader: true),
+                      _buildTableCell('Description', isHeader: true),
+                      _buildTableCell('Category', isHeader: true),
+                      _buildTableCell('Vendor', isHeader: true),
+                      _buildTableCell('Amount', isHeader: true),
+                    ],
+                  ),
+                  // Data Rows
+                  for (final expense in _expenses)
+                    pw.TableRow(
+                      children: [
+                        _buildTableCell(DateFormat('MM/dd/yy').format(expense.date)),
+                        _buildTableCell(expense.description),
+                        _buildTableCell(expense.category),
+                        _buildTableCell(expense.vendor ?? '-'),
+                        _buildTableCell('P${expense.amount.toStringAsFixed(2)}'),
+                      ],
+                    ),
+                ],
+              ),
+            ];
+          },
+        ),
+      );
+
+      // Print or share the PDF
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error printing expense history: $e')),
+        );
+      }
+    }
+  }
+
+  pw.Widget _buildTableCell(String text, {bool isHeader = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(8),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          fontSize: isHeader ? 12 : 10,
+          fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal,
+        ),
       ),
     );
   }

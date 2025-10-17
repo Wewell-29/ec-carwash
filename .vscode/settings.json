@@ -1,3 +1,4 @@
 {
-    "java.configuration.updateBuildConfiguration": "automatic"
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "cmake.sourceDirectory": "/home/codewithesc/Documents/Codex Files/ec-carwash/ec_carwash/linux/runner"
 }

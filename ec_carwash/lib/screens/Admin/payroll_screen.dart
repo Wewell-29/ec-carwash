@@ -18,12 +18,155 @@ class _PayrollScreenState extends State<PayrollScreen> {
     'Team A': 0,
     'Team B': 0,
   };
+  Map<String, bool> _teamDisbursementStatus = {
+    'Team A': false,
+    'Team B': false,
+  };
+  Map<String, DateTime?> _teamDisbursementDate = {
+    'Team A': null,
+    'Team B': null,
+  };
   String _selectedPeriod = 'today'; // today, week, month, all
 
   @override
   void initState() {
     super.initState();
     _loadPayrollData();
+  }
+
+  Future<void> _loadDisbursementStatus(DateTime startDate, DateTime endDate) async {
+    try {
+      // Create unique ID for this period and team
+      final periodId = '${_selectedPeriod}_${startDate.year}_${startDate.month}_${startDate.day}';
+
+      for (final team in ['Team A', 'Team B']) {
+        final disbursementDoc = await FirebaseFirestore.instance
+            .collection('PayrollDisbursements')
+            .doc('${periodId}_$team')
+            .get();
+
+        if (disbursementDoc.exists) {
+          final data = disbursementDoc.data()!;
+          _teamDisbursementStatus[team] = data['isDisbursed'] ?? false;
+          _teamDisbursementDate[team] = (data['disbursedAt'] as Timestamp?)?.toDate();
+        } else {
+          _teamDisbursementStatus[team] = false;
+          _teamDisbursementDate[team] = null;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading disbursement status: $e');
+    }
+  }
+
+  Future<void> _disburseSalary(String teamName, double commission) async {
+    try {
+      // Show confirmation dialog
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirm Disbursement', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Disburse salary to $teamName?'),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.yellow.shade50,
+                  border: Border.all(color: Colors.black87),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Team: $teamName', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    Text('Amount: ₱${commission.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text('Period: $_selectedPeriod', style: const TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.yellow.shade700,
+                foregroundColor: Colors.black87,
+              ),
+              child: const Text('Confirm Disbursement', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+
+      if (confirm != true) return;
+
+      // Calculate period dates for ID
+      DateTime startDate = DateTime.now();
+      switch (_selectedPeriod) {
+        case 'today':
+          startDate = DateTime(startDate.year, startDate.month, startDate.day);
+          break;
+        case 'week':
+          startDate = startDate.subtract(Duration(days: startDate.weekday - 1));
+          startDate = DateTime(startDate.year, startDate.month, startDate.day);
+          break;
+        case 'month':
+          startDate = DateTime(startDate.year, startDate.month, 1);
+          break;
+        case 'all':
+          startDate = DateTime(2020, 1, 1);
+          break;
+      }
+
+      final periodId = '${_selectedPeriod}_${startDate.year}_${startDate.month}_${startDate.day}';
+      final docId = '${periodId}_$teamName';
+
+      // Save disbursement record
+      await FirebaseFirestore.instance
+          .collection('PayrollDisbursements')
+          .doc(docId)
+          .set({
+        'teamName': teamName,
+        'amount': commission,
+        'period': _selectedPeriod,
+        'periodStartDate': Timestamp.fromDate(startDate),
+        'isDisbursed': true,
+        'disbursedAt': FieldValue.serverTimestamp(),
+        'disbursedBy': 'Admin', // TODO: Get from auth
+      });
+
+      // Update local state
+      setState(() {
+        _teamDisbursementStatus[teamName] = true;
+        _teamDisbursementDate[teamName] = DateTime.now();
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Salary disbursed to $teamName successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error disbursing salary: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _loadPayrollData() async {
@@ -89,6 +232,9 @@ class _PayrollScreenState extends State<PayrollScreen> {
         counts[team] = counts[team]! + 1;
       }
 
+      // Load disbursement status for this period
+      await _loadDisbursementStatus(startDate, endDate);
+
       setState(() {
         _teamCommissions = commissions;
         _teamBookingCounts = counts;
@@ -124,12 +270,16 @@ class _PayrollScreenState extends State<PayrollScreen> {
                         'Team A',
                         _teamCommissions['Team A']!,
                         _teamBookingCounts['Team A']!,
+                        _teamDisbursementStatus['Team A']!,
+                        _teamDisbursementDate['Team A'],
                       ),
                       const SizedBox(height: 12),
                       _buildTeamCard(
                         'Team B',
                         _teamCommissions['Team B']!,
                         _teamBookingCounts['Team B']!,
+                        _teamDisbursementStatus['Team B']!,
+                        _teamDisbursementDate['Team B'],
                       ),
                     ],
                   ),
@@ -214,7 +364,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
     );
   }
 
-  Widget _buildTeamCard(String teamName, double commission, int jobCount) {
+  Widget _buildTeamCard(String teamName, double commission, int jobCount, bool isDisbursed, DateTime? disbursementDate) {
     return Card(
       margin: EdgeInsets.zero,
       color: Colors.yellow.shade50,
@@ -336,6 +486,65 @@ class _PayrollScreenState extends State<PayrollScreen> {
                         ),
                       ),
                     ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 12),
+            // Disbursement Status and Button
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            isDisbursed ? Icons.check_circle : Icons.pending,
+                            color: isDisbursed ? Colors.green : Colors.orange,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            isDisbursed ? 'Disbursed' : 'Pending',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isDisbursed ? Colors.green : Colors.orange,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isDisbursed && disbursementDate != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Disbursed on ${disbursementDate.toString().substring(0, 16)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: isDisbursed ? null : () => _disburseSalary(teamName, commission),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isDisbursed ? Colors.grey : Colors.yellow.shade700,
+                    foregroundColor: Colors.black87,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    disabledBackgroundColor: Colors.grey.shade300,
+                    disabledForegroundColor: Colors.grey.shade600,
+                  ),
+                  icon: Icon(isDisbursed ? Icons.check : Icons.payment),
+                  label: Text(
+                    isDisbursed ? 'Already Disbursed' : 'Disburse Salary',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
               ],

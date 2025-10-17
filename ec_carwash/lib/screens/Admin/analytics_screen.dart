@@ -11,8 +11,10 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  String _selectedFilter = 'today'; // today, weekly, monthly, yearly
+  String _selectedFilter = 'today'; // today, weekly, monthly, yearly, custom
   bool _isLoading = true;
+  DateTime? _startDate;
+  DateTime? _endDate;
 
   // Peak Operating Time Data (bookings per hour)
   Map<int, int> _hourlyBookings = {};
@@ -62,6 +64,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           startDate = DateTime(now.year, 1, 1);
           endDate = DateTime(now.year, 12, 31, 23, 59, 59);
           break;
+        case 'custom':
+          if (_startDate != null && _endDate != null) {
+            startDate = _startDate!;
+            endDate = DateTime(_endDate!.year, _endDate!.month, _endDate!.day, 23, 59, 59);
+          } else {
+            startDate = DateTime(now.year, now.month, now.day);
+          }
+          break;
         default:
           startDate = DateTime(now.year, now.month, now.day);
       }
@@ -90,7 +100,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         }
 
         txnCount++;
-        final total = (data['total'] as num?)?.toDouble() ?? 0.0;
+        // Use totalAmount (unified field) with fallback to 'total' for legacy data
+        final total = (data['totalAmount'] as num?)?.toDouble() ??
+                      (data['total'] as num?)?.toDouble() ?? 0.0;
         final services = data['services'] as List?;
 
         totalRev += total;
@@ -233,6 +245,24 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           _buildFilterChip('Monthly', 'monthly'),
           const SizedBox(width: 8),
           _buildFilterChip('Yearly', 'yearly'),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _showCustomRangeDialog,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.black87,
+              backgroundColor: _selectedFilter == 'custom' ? Colors.yellow.shade700 : Colors.yellow.shade50,
+              side: BorderSide(color: Colors.black87, width: _selectedFilter == 'custom' ? 1.5 : 1),
+            ),
+            icon: const Icon(Icons.date_range, size: 18),
+            label: Text(
+              _selectedFilter == 'custom' && _startDate != null && _endDate != null
+                  ? 'Custom Range'
+                  : 'Custom',
+              style: TextStyle(
+                fontWeight: _selectedFilter == 'custom' ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -448,7 +478,53 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       completeHours[hour] = _hourlyBookings[hour] ?? 0;
     }
 
-    final maxBookings = completeHours.values.reduce((a, b) => a > b ? a : b);
+    final maxBookings = completeHours.values.isEmpty
+        ? 1
+        : completeHours.values.reduce((a, b) => a > b ? a : b);
+
+    // If no bookings, show empty state
+    if (maxBookings == 0 || completeHours.isEmpty) {
+      return Card(
+        color: Colors.yellow.shade50,
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.black87, width: 1.5),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.access_time, color: Colors.black87, size: 20),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Peak Operating Hours',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Center(
+                child: Text(
+                  'No booking data available for the selected period',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.black.withValues(alpha: 0.5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Card(
       color: Colors.yellow.shade50,
@@ -825,6 +901,193 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  void _showCustomRangeDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => _CustomRangeDialog(
+        startDate: _startDate,
+        endDate: _endDate,
+        onApply: (start, end) {
+          setState(() {
+            _startDate = start;
+            _endDate = end;
+            _selectedFilter = 'custom';
+          });
+          _loadAnalyticsData();
+        },
+      ),
+    );
+  }
+}
+
+// Custom Range Dialog Widget
+class _CustomRangeDialog extends StatefulWidget {
+  final DateTime? startDate;
+  final DateTime? endDate;
+  final Function(DateTime start, DateTime end) onApply;
+
+  const _CustomRangeDialog({
+    this.startDate,
+    this.endDate,
+    required this.onApply,
+  });
+
+  @override
+  State<_CustomRangeDialog> createState() => _CustomRangeDialogState();
+}
+
+class _CustomRangeDialogState extends State<_CustomRangeDialog> {
+  int? _startMonth;
+  int? _startYear;
+  int? _endMonth;
+  int? _endYear;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.startDate != null) {
+      _startMonth = widget.startDate!.month;
+      _startYear = widget.startDate!.year;
+    }
+    if (widget.endDate != null) {
+      _endMonth = widget.endDate!.month;
+      _endYear = widget.endDate!.year;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Select Date Range', style: TextStyle(fontWeight: FontWeight.bold)),
+      content: SizedBox(
+        width: 500,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Start Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(
+                      labelText: 'Month',
+                      border: OutlineInputBorder(),
+                    ),
+                    value: _startMonth,
+                    items: List.generate(12, (index) {
+                      final month = index + 1;
+                      return DropdownMenuItem(
+                        value: month,
+                        child: Text(DateTime(2000, month).toString().split(' ')[0].split('-')[1]),
+                      );
+                    }),
+                    onChanged: (value) => setState(() => _startMonth = value),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(
+                      labelText: 'Year',
+                      border: OutlineInputBorder(),
+                    ),
+                    value: _startYear,
+                    items: List.generate(5, (index) {
+                      final year = DateTime.now().year - index;
+                      return DropdownMenuItem(
+                        value: year,
+                        child: Text(year.toString()),
+                      );
+                    }),
+                    onChanged: (value) => setState(() => _startYear = value),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            const Text('End Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(
+                      labelText: 'Month',
+                      border: OutlineInputBorder(),
+                    ),
+                    value: _endMonth,
+                    items: List.generate(12, (index) {
+                      final month = index + 1;
+                      return DropdownMenuItem(
+                        value: month,
+                        child: Text(DateTime(2000, month).toString().split(' ')[0].split('-')[1]),
+                      );
+                    }),
+                    onChanged: (value) => setState(() => _endMonth = value),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(
+                      labelText: 'Year',
+                      border: OutlineInputBorder(),
+                    ),
+                    value: _endYear,
+                    items: List.generate(5, (index) {
+                      final year = DateTime.now().year - index;
+                      return DropdownMenuItem(
+                        value: year,
+                        child: Text(year.toString()),
+                      );
+                    }),
+                    onChanged: (value) => setState(() => _endYear = value),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            if (_startMonth == null || _startYear == null || _endMonth == null || _endYear == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Please select both start and end dates')),
+              );
+              return;
+            }
+
+            final startDate = DateTime(_startYear!, _startMonth!, 1);
+            final endDate = DateTime(_endYear!, _endMonth! + 1, 1).subtract(const Duration(seconds: 1));
+
+            if (endDate.isBefore(startDate)) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('End date must be after start date')),
+              );
+              return;
+            }
+
+            Navigator.pop(context);
+            widget.onApply(startDate, endDate);
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.yellow.shade700,
+            foregroundColor: Colors.black87,
+          ),
+          child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ],
     );
   }
 }
