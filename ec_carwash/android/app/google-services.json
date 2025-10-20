@@ -30,6 +30,14 @@
           }
         },
         {
+          "client_id": "14839235089-r07kai4gcu15e2vvd9e14hd11o79o8ge.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.ec_carwash",
+            "certificate_hash": "5c1493689a90979bf7026046587a2bedea0e9039"
+          }
+        },
+        {
           "client_id": "14839235089-an3b18j0b8039dnmm0at8jermsshf9e8.apps.googleusercontent.com",
           "client_type": 3
         }

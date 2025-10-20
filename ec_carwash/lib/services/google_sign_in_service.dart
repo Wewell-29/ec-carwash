@@ -54,9 +54,14 @@ class GoogleSignInService {
         );
         return userCredential.user;
       }
+    } on FirebaseAuthException catch (e) {
+      print('FirebaseAuthException: ${e.code} - ${e.message}');
+      // Re-throw with more details so the UI can show specific errors
+      throw Exception('Firebase Auth Error [${e.code}]: ${e.message}');
     } catch (e) {
       print('Error signing in with Google: $e');
-      return null;
+      // Re-throw the error instead of returning null so we get better error messages
+      rethrow;
     }
   }
 

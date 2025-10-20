@@ -143,10 +143,34 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       if (mounted) {
+        String errorMessage = 'Sign in failed';
+
+        // Parse the error to provide helpful messages
+        final errorString = e.toString().toLowerCase();
+
+        if (errorString.contains('network')) {
+          errorMessage = 'Network error. Please check your internet connection.';
+        } else if (errorString.contains('com.google.android.gms') ||
+                   errorString.contains('google play services')) {
+          errorMessage = 'Google Play Services not available. Please install it.';
+        } else if (errorString.contains('10:') || errorString.contains('sign_in_failed')) {
+          errorMessage = 'Sign in configuration error. Please contact support.';
+        } else if (errorString.contains('cancelled') || errorString.contains('cancel')) {
+          errorMessage = 'Sign in was cancelled';
+        } else if (errorString.contains('account-exists-with-different-credential')) {
+          errorMessage = 'This email is already registered with a different method.';
+        } else if (errorString.contains('invalid-credential')) {
+          errorMessage = 'Invalid credentials. Please try again.';
+        } else {
+          // Show the actual error for debugging
+          errorMessage = 'Sign in failed: ${e.toString()}';
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Sign in failed: $e'),
+            content: Text(errorMessage),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
