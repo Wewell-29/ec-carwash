@@ -1053,7 +1053,7 @@ class _VehicleServicesScreenState extends State<VehicleServicesScreen> {
                       final prices =
                           entry.value['prices'] as Map<String, dynamic>;
                       final desc = entry.value['description'] ?? "";
-                      final price = prices[widget.vehicleType] as int;
+                      final price = ((prices[widget.vehicleType]) as num?)?.toInt() ?? 0;
 
                       return Card(
                         shape: RoundedRectangleBorder(

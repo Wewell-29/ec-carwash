@@ -62,16 +62,48 @@ class Service {
 
   factory Service.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+
+    // Coerce prices to Map<String, double> regardless of incoming numeric type
+    final Map<String, double> parsedPrices = {};
+    final rawPrices = data['prices'];
+    if (rawPrices is Map) {
+      rawPrices.forEach((key, value) {
+        if (key is String) {
+          if (value is num) {
+            parsedPrices[key] = value.toDouble();
+          } else if (value is String) {
+            final d = double.tryParse(value);
+            if (d != null) parsedPrices[key] = d; // skip invalids silently
+          }
+        }
+      });
+    }
+
+    DateTime parseDate(dynamic v) {
+      if (v is Timestamp) return v.toDate();
+      if (v is DateTime) return v;
+      if (v is int) {
+        // Heuristic: treat >= 10^12 as millis, else seconds
+        final isMillis = v.abs() >= 1000000000000;
+        return DateTime.fromMillisecondsSinceEpoch(isMillis ? v : v * 1000);
+      }
+      if (v is String) {
+        final dt = DateTime.tryParse(v);
+        if (dt != null) return dt;
+      }
+      return DateTime.now();
+    }
+
     return Service(
       id: doc.id,
-      code: data['code'],
-      name: data['name'],
-      category: data['category'],
-      description: data['description'],
-      prices: Map<String, double>.from(data['prices']),
-      isActive: data['isActive'] ?? true,
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      updatedAt: (data['updatedAt'] as Timestamp).toDate(),
+      code: (data['code'] ?? '').toString(),
+      name: (data['name'] ?? '').toString(),
+      category: (data['category'] ?? '').toString(),
+      description: (data['description'] ?? '').toString(),
+      prices: parsedPrices,
+      isActive: (data['isActive'] is bool) ? data['isActive'] as bool : true,
+      createdAt: parseDate(data['createdAt']),
+      updatedAt: parseDate(data['updatedAt']),
     );
   }
 }

@@ -14,6 +14,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        // Required by some dependencies (e.g., flutter_local_notifications)
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -52,4 +54,7 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
     
     // Add other Firebase products as needed
+
+    // Core library desugaring for Java 8+ APIs used by dependencies
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
