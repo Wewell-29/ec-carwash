@@ -5,6 +5,10 @@ import * as logger from "firebase-functions/logger";
 // Initialize Firebase Admin SDK
 admin.initializeApp();
 
+// Preferred locale/timezone for human-readable times in messages
+const DEFAULT_LOCALE = process.env.APP_LOCALE || "en-PH";
+const DEFAULT_TIME_ZONE = process.env.APP_TIME_ZONE || "Asia/Manila";
+
 /**
  * Send push notification when booking status changes
  * Triggers on any update to a booking document in Firestore
@@ -98,10 +102,17 @@ export const sendBookingNotification = onDocumentUpdated(
           return;
         }
       } else if (scheduleChanged) {
-        const when = afterTs ? new Date(afterTs.toMillis()).toLocaleString("en-US", {
-          year: "numeric", month: "short", day: "2-digit",
-          hour: "2-digit", minute: "2-digit"
-        }) : "a new time";
+        const when = afterTs
+          ? new Date(afterTs.toMillis()).toLocaleString(DEFAULT_LOCALE, {
+              timeZone: DEFAULT_TIME_ZONE,
+              year: "numeric",
+              month: "short",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: true,
+            })
+          : "a new time";
         notificationTitle = "Booking Rescheduled";
         notificationBody = `Your booking has been rescheduled to ${when}.`;
         notificationType = "booking_rescheduled";
@@ -208,10 +219,6 @@ export const sendNotificationOnCreate = onDocumentUpdated(
       const message = (data.message as string | undefined) ?? "You have a new notification";
 
       const allowed = [
-        "booking_in_progress",
-        "booking_completed",
-        "booking_cancelled",
-        "booking_rescheduled",
         "general",
       ];
       if (!allowed.includes(type)) return;

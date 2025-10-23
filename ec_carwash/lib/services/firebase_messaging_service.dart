@@ -10,16 +10,10 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (kDebugMode) {
     print('Handling a background message: ${message.messageId}');
   }
-
-  // Display notification even when app is in background
-  if (message.notification != null) {
-    await LocalNotificationService.showNotification(
-      id: message.hashCode,
-      title: message.notification!.title ?? 'EC Carwash',
-      body: message.notification!.body ?? 'You have a new notification',
-      payload: message.data.toString(),
-    );
-  }
+  // Avoid duplicate notifications: when a notification payload is sent,
+  // Android/iOS will already display it while app is backgrounded.
+  // Only handle data-only messages here if needed.
+  // if (message.notification == null) { ... }
 }
 
 /// Service to handle Firebase Cloud Messaging
@@ -90,15 +84,17 @@ class FirebaseMessagingService {
       );
     }
 
-    // Persist to Firestore for in-app notifications list
+    // Avoid duplicates in the in-app Notifications list:
+    // booking_* notifications are already created by the backend/admin flow.
     try {
       final email = FirebaseAuth.instance.currentUser?.email;
-      if (email != null) {
+      final type = (message.data['type'] ?? 'general').toString();
+      if (email != null && type == 'general') {
         await NotificationManager.createNotification(
           userId: email,
           title: message.notification?.title ?? 'EC Carwash',
           message: message.notification?.body ?? 'You have a new notification',
-          type: (message.data['type'] ?? 'general').toString(),
+          type: type,
           metadata: message.data.isEmpty ? null : Map<String, dynamic>.from(message.data),
         );
       }
@@ -112,15 +108,16 @@ class FirebaseMessagingService {
       print('Data: ${message.data}');
     }
 
-    // Persist to Firestore as the user likely expects to see it in the app list
+    // Avoid duplicates: only persist "general" messages opened from tray.
     try {
       final email = FirebaseAuth.instance.currentUser?.email;
-      if (email != null) {
+      final type = (message.data['type'] ?? 'general').toString();
+      if (email != null && type == 'general') {
         NotificationManager.createNotification(
           userId: email,
           title: message.notification?.title ?? 'EC Carwash',
           message: message.notification?.body ?? 'You have a new notification',
-          type: (message.data['type'] ?? 'general').toString(),
+          type: type,
           metadata: message.data.isEmpty ? null : Map<String, dynamic>.from(message.data),
         );
       }
