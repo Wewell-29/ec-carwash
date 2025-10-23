@@ -81,26 +81,54 @@ class ExpenseManager {
     DateTime? endDate,
     int? limit,
   }) async {
+    // To avoid Firebase composite index requirement, we'll use client-side filtering
+    // when combining category filter with date range
+
     Query query = _firestore.collection(_collection).orderBy('date', descending: true);
 
+    // Only apply server-side filters if using date range WITHOUT category
+    // or category WITHOUT date range to avoid index requirement
+    bool needsClientSideFiltering = false;
+
+    // Strategy: Avoid composite indexes by doing client-side filtering when needed
     if (category != null && category != 'All') {
-      query = query.where('category', isEqualTo: category);
+      // Category filter - just get by category, sort client-side
+      query = _firestore.collection(_collection).where('category', isEqualTo: category);
+      needsClientSideFiltering = true; // Will filter dates and sort client-side
+    } else if (startDate != null || endDate != null) {
+      // Date filter only - can use server-side with orderBy
+      if (startDate != null) {
+        query = query.where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate));
+      }
+      if (endDate != null) {
+        query = query.where('date', isLessThanOrEqualTo: Timestamp.fromDate(endDate));
+      }
     }
-
-    if (startDate != null) {
-      query = query.where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate));
-    }
-
-    if (endDate != null) {
-      query = query.where('date', isLessThanOrEqualTo: Timestamp.fromDate(endDate));
-    }
-
-    if (limit != null) {
-      query = query.limit(limit);
-    }
+    // else: no filters, just orderBy date (already set above)
 
     final snapshot = await query.get();
-    return snapshot.docs.map((doc) => ExpenseData.fromFirestore(doc)).toList();
+    List<ExpenseData> expenses = snapshot.docs.map((doc) => ExpenseData.fromFirestore(doc)).toList();
+
+    // Apply client-side filtering if needed
+    if (needsClientSideFiltering) {
+      // Filter by date range if specified
+      if (startDate != null) {
+        expenses = expenses.where((expense) => !expense.date.isBefore(startDate)).toList();
+      }
+      if (endDate != null) {
+        expenses = expenses.where((expense) => !expense.date.isAfter(endDate)).toList();
+      }
+
+      // Sort by date descending (client-side)
+      expenses.sort((a, b) => b.date.compareTo(a.date));
+    }
+
+    // Apply limit after filtering
+    if (limit != null && expenses.length > limit) {
+      expenses = expenses.sublist(0, limit);
+    }
+
+    return expenses;
   }
 
   // Get expense by ID

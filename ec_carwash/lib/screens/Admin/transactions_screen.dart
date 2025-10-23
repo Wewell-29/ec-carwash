@@ -4,68 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
-class TransactionData {
-  final String? id;
-  final Map<String, dynamic> customer;
-  final List<dynamic> services;
-  final double total;
-  final double cash;
-  final double change;
-  final DateTime date;
-  final Map<String, dynamic> time;
-  final DateTime createdAt;
-  final DateTime transactionAt;
-  final String status;
-  final String? source;
-  final String? bookingId;
-
-  TransactionData({
-    this.id,
-    required this.customer,
-    required this.services,
-    required this.total,
-    required this.cash,
-    required this.change,
-    required this.date,
-    required this.time,
-    required this.createdAt,
-    required this.transactionAt,
-    required this.status,
-    this.source,
-    this.bookingId,
-  });
-
-  factory TransactionData.fromJson(Map<String, dynamic> json, String docId) {
-    final date = json['date'] is Timestamp
-        ? (json['date'] as Timestamp).toDate()
-        : DateTime.parse(json['date'] ?? DateTime.now().toIso8601String());
-
-    final createdAt = json['createdAt'] is Timestamp
-        ? (json['createdAt'] as Timestamp).toDate()
-        : DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String());
-
-    final transactionAt = json['transactionAt'] is Timestamp
-        ? (json['transactionAt'] as Timestamp).toDate()
-        : DateTime.parse(json['transactionAt'] ?? DateTime.now().toIso8601String());
-
-    return TransactionData(
-      id: docId,
-      customer: json['customer'] ?? {},
-      services: json['services'] ?? [],
-      total: (json['total'] ?? 0).toDouble(),
-      cash: (json['cash'] ?? 0).toDouble(),
-      change: (json['change'] ?? 0).toDouble(),
-      date: date,
-      time: json['time'] ?? {},
-      createdAt: createdAt,
-      transactionAt: transactionAt,
-      status: json['status'] ?? 'unknown',
-      source: json['source'],
-      bookingId: json['bookingId'],
-    );
-  }
-}
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:ec_carwash/data_models/unified_transaction_data.dart' as txn;
 
 class TransactionsScreen extends StatefulWidget {
   const TransactionsScreen({super.key});
@@ -75,7 +15,7 @@ class TransactionsScreen extends StatefulWidget {
 }
 
 class _TransactionsScreenState extends State<TransactionsScreen> {
-  List<TransactionData> _transactions = [];
+  List<txn.Transaction> _transactions = [];
   bool _isLoading = true;
   String _selectedFilter = 'today'; // Default to today
   DateTime? _startDate;
@@ -122,7 +62,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
 
       setState(() {
         _transactions = snapshot.docs.map((doc) {
-          return TransactionData.fromJson(doc.data() as Map<String, dynamic>, doc.id);
+          return txn.Transaction.fromJson(doc.data() as Map<String, dynamic>, doc.id);
         }).toList();
         _isLoading = false;
       });
@@ -280,11 +220,15 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     );
   }
 
-  Widget _buildCompactTransactionCard(TransactionData transaction) {
+  Widget _buildCompactTransactionCard(txn.Transaction transaction) {
     final sourceIcon = _getSourceIcon(transaction.source);
-    final customerName = transaction.customer['name'] ?? 'Unknown Customer';
-    final plateNumber = transaction.customer['plateNumber'] ?? 'N/A';
-    final timeFormatted = transaction.time['formatted'] ?? 'N/A';
+    final customerName = transaction.customerName.isNotEmpty
+        ? transaction.customerName
+        : 'Did Not Specify';
+    final plateNumber = transaction.vehiclePlateNumber.isNotEmpty
+        ? transaction.vehiclePlateNumber
+        : 'N/A';
+    final timeFormatted = DateFormat('h:mm a').format(transaction.transactionAt);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -366,7 +310,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                     border: Border.all(color: Colors.black87, width: 0.5),
                   ),
                   child: Text(
-                    transaction.source?.toUpperCase() ?? 'POS',
+                    transaction.source.toUpperCase(),
                     style: const TextStyle(
                       color: Colors.black87,
                       fontWeight: FontWeight.bold,
@@ -417,7 +361,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                         border: Border.all(color: Colors.black87, width: 0.5),
                       ),
                       child: Text(
-                        transaction.source?.toUpperCase() ?? 'POS',
+                        transaction.source.toUpperCase(),
                         style: const TextStyle(
                           color: Colors.black87,
                           fontWeight: FontWeight.bold,
@@ -441,8 +385,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                 const SizedBox(height: 8),
                 _buildInfoRow('Name', customerName),
                 _buildInfoRow('Plate Number', plateNumber),
-                _buildInfoRow('Contact', transaction.customer['contactNumber'] ?? 'N/A'),
-                _buildInfoRow('Vehicle Type', transaction.customer['vehicleType'] ?? 'N/A'),
+                _buildInfoRow('Contact', transaction.contactNumber ?? 'N/A'),
+                _buildInfoRow('Vehicle Type', transaction.vehicleType ?? 'N/A'),
                 const SizedBox(height: 12),
                 // Items
                 const Text(
@@ -455,10 +399,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                 ),
                 const SizedBox(height: 8),
                 ...transaction.services.map((item) {
-                  final code = item['serviceCode'] ?? 'N/A';
-                  final vehicleType = item['vehicleType'] ?? 'N/A';
-                  final quantity = item['quantity'] ?? 1;
-                  final subtotal = (item['subtotal'] ?? 0).toDouble();
+                  final code = item.serviceCode;
+                  final vehicleType = item.vehicleType;
+                  final quantity = item.quantity;
+                  final subtotal = item.price * item.quantity;
 
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 6),
@@ -562,91 +506,378 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     );
   }
 
-  Future<void> _printSingleReceipt(TransactionData transaction) async {
+  // UNIFIED THERMAL RECEIPT (same format as POS screen)
+  Future<void> _printSingleReceipt(txn.Transaction transaction) async {
     try {
       final pdf = pw.Document();
 
+      // Try to load fonts, fallback to default
+      pw.Font? regularFont;
+      pw.Font? boldFont;
+      try {
+        regularFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Regular.ttf"));
+        boldFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Bold.ttf"));
+      } catch (e) {
+        debugPrint('Using default fonts: $e');
+      }
+
+      final transactionId = transaction.id?.substring(0, 12) ?? 'N/A';
+      final dateStr = DateFormat('yyyy-MM-dd').format(transaction.transactionAt);
+      final timeStr = DateFormat('HH:mm').format(transaction.transactionAt);
+      final customerName = transaction.customerName.isNotEmpty
+          ? transaction.customerName
+          : 'Did Not Specify';
+      final plateNumber = transaction.vehiclePlateNumber.isNotEmpty
+          ? transaction.vehiclePlateNumber
+          : 'N/A';
+      final vehicleType = transaction.vehicleType ?? '';
+      final contactNumber = transaction.contactNumber ?? '';
+
+      // Thermal receipt style - 80mm width (226.77 points)
       pdf.addPage(
         pw.Page(
-          pageFormat: PdfPageFormat.roll80,
-          build: (pw.Context context) {
+          pageFormat: const PdfPageFormat(226.77, double.infinity, marginAll: 10),
+          build: (pw.Context ctx) {
             return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
+                // Header - Business Name
                 pw.Text(
-                  'EC CARWASH',
-                  style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
+                  "EC CARWASH",
+                  style: pw.TextStyle(
+                    font: boldFont,
+                    fontSize: 16,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
                 ),
-                pw.Text('Balayan Batangas', style: const pw.TextStyle(fontSize: 12)),
-                pw.SizedBox(height: 8),
-                pw.Divider(),
-                pw.SizedBox(height: 8),
-                pw.Text('RECEIPT', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-                pw.Text('TXN: ${transaction.id?.substring(0, 12) ?? 'N/A'}', style: const pw.TextStyle(fontSize: 10)),
-                pw.Text('Date: ${DateFormat('MMM dd, yyyy HH:mm').format(transaction.transactionAt)}', style: const pw.TextStyle(fontSize: 10)),
-                pw.SizedBox(height: 8),
-                pw.Divider(),
-                pw.SizedBox(height: 8),
-                pw.Text('Customer: ${transaction.customer['name'] ?? 'N/A'}', style: const pw.TextStyle(fontSize: 12)),
-                pw.Text('Plate: ${transaction.customer['plateNumber'] ?? 'N/A'}', style: const pw.TextStyle(fontSize: 12)),
-                pw.Text('Vehicle: ${transaction.customer['vehicleType'] ?? 'N/A'}', style: const pw.TextStyle(fontSize: 12)),
-                pw.Text('Contact: ${transaction.customer['contactNumber'] ?? 'N/A'}', style: const pw.TextStyle(fontSize: 12)),
-                pw.SizedBox(height: 8),
-                pw.Divider(),
-                pw.SizedBox(height: 8),
-                pw.Text('SERVICES:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  "Balayan Batangas",
+                  style: pw.TextStyle(
+                    font: regularFont,
+                    fontSize: 8,
+                  ),
+                ),
                 pw.SizedBox(height: 4),
-                ...transaction.services.map((service) {
-                  final code = service['serviceCode'] ?? 'N/A';
-                  final vehicleType = service['vehicleType'] ?? 'N/A';
-                  final quantity = service['quantity'] ?? 1;
-                  final subtotal = (service['subtotal'] ?? 0).toDouble();
-                  return pw.Padding(
-                    padding: const pw.EdgeInsets.only(bottom: 4),
-                    child: pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Expanded(child: pw.Text('$code ($vehicleType) x$quantity', style: const pw.TextStyle(fontSize: 11))),
-                        pw.Text('P${subtotal.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 11)),
-                      ],
-                    ),
+                pw.Text(
+                  "SALES INVOICE",
+                  style: pw.TextStyle(
+                    font: boldFont,
+                    fontSize: 10,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 8),
+
+                // Divider
+                pw.Divider(thickness: 1),
+
+                // Transaction Info
+                pw.Container(
+                  width: double.infinity,
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      _receiptRow("TXN ID:", transactionId, boldFont),
+                      _receiptRow("Date:", dateStr, regularFont),
+                      _receiptRow("Time:", timeStr, regularFont),
+                      pw.SizedBox(height: 4),
+                      _receiptRow("Customer:", customerName, regularFont),
+                      _receiptRow("Plate No:", plateNumber, regularFont),
+                      if (contactNumber.isNotEmpty)
+                        _receiptRow("Contact:", contactNumber, regularFont),
+                      if (vehicleType.isNotEmpty)
+                        _receiptRow("Vehicle:", vehicleType, regularFont),
+                    ],
+                  ),
+                ),
+
+                pw.Divider(thickness: 1),
+
+                // Items header
+                pw.Container(
+                  width: double.infinity,
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Expanded(
+                        flex: 3,
+                        child: pw.Text(
+                          "ITEM",
+                          style: pw.TextStyle(
+                            font: boldFont,
+                            fontSize: 8,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      pw.Container(
+                        width: 25,
+                        child: pw.Text(
+                          "QTY",
+                          style: pw.TextStyle(
+                            font: boldFont,
+                            fontSize: 8,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                          textAlign: pw.TextAlign.center,
+                        ),
+                      ),
+                      pw.Container(
+                        width: 45,
+                        child: pw.Text(
+                          "PRICE",
+                          style: pw.TextStyle(
+                            font: boldFont,
+                            fontSize: 8,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                          textAlign: pw.TextAlign.right,
+                        ),
+                      ),
+                      pw.Container(
+                        width: 50,
+                        child: pw.Text(
+                          "AMOUNT",
+                          style: pw.TextStyle(
+                            font: boldFont,
+                            fontSize: 8,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                          textAlign: pw.TextAlign.right,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                pw.Container(
+                  width: double.infinity,
+                  height: 0.5,
+                  color: PdfColors.black,
+                ),
+
+                // Items
+                ...transaction.services.map((item) {
+                  final price = item.price;
+                  final qty = item.quantity;
+                  final subtotal = price * qty;
+                  final serviceName = item.serviceName.isNotEmpty
+                      ? item.serviceName
+                      : item.serviceCode;
+                  final serviceCategory = item.vehicleType;
+
+                  return pw.Column(
+                    children: [
+                      pw.SizedBox(height: 4),
+                      pw.Container(
+                        width: double.infinity,
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            // Service name
+                            pw.Text(
+                              serviceName,
+                              style: pw.TextStyle(
+                                font: boldFont,
+                                fontSize: 9,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
+                            ),
+                            pw.SizedBox(height: 2),
+                            // Price row with qty, price, amount
+                            pw.Row(
+                              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                              children: [
+                                pw.Text(
+                                  "  $serviceCategory",
+                                  style: pw.TextStyle(
+                                    font: regularFont,
+                                    fontSize: 7,
+                                    color: PdfColors.grey700,
+                                  ),
+                                ),
+                                pw.Row(
+                                  children: [
+                                    pw.Container(
+                                      width: 25,
+                                      child: pw.Text(
+                                        "$qty",
+                                        style: pw.TextStyle(
+                                          font: regularFont,
+                                          fontSize: 9,
+                                        ),
+                                        textAlign: pw.TextAlign.center,
+                                      ),
+                                    ),
+                                    pw.Container(
+                                      width: 45,
+                                      child: pw.Text(
+                                        "P${price.toStringAsFixed(2)}",
+                                        style: pw.TextStyle(
+                                          font: regularFont,
+                                          fontSize: 9,
+                                        ),
+                                        textAlign: pw.TextAlign.right,
+                                      ),
+                                    ),
+                                    pw.Container(
+                                      width: 50,
+                                      child: pw.Text(
+                                        "P${subtotal.toStringAsFixed(2)}",
+                                        style: pw.TextStyle(
+                                          font: regularFont,
+                                          fontSize: 9,
+                                        ),
+                                        textAlign: pw.TextAlign.right,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      pw.SizedBox(height: 4),
+                    ],
                   );
                 }),
-                pw.SizedBox(height: 8),
-                pw.Divider(),
+
+                pw.Divider(thickness: 1),
+
+                // Totals
+                pw.Container(
+                  width: double.infinity,
+                  child: pw.Column(
+                    children: [
+                      pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text(
+                            "SUBTOTAL:",
+                            style: pw.TextStyle(
+                              font: regularFont,
+                              fontSize: 9,
+                            ),
+                          ),
+                          pw.Text(
+                            "P${transaction.total.toStringAsFixed(2)}",
+                            style: pw.TextStyle(
+                              font: regularFont,
+                              fontSize: 9,
+                            ),
+                          ),
+                        ],
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text(
+                            "TOTAL:",
+                            style: pw.TextStyle(
+                              font: boldFont,
+                              fontSize: 12,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                          pw.Text(
+                            "P${transaction.total.toStringAsFixed(2)}",
+                            style: pw.TextStyle(
+                              font: boldFont,
+                              fontSize: 12,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text(
+                            "Cash:",
+                            style: pw.TextStyle(
+                              font: regularFont,
+                              fontSize: 9,
+                            ),
+                          ),
+                          pw.Text(
+                            "P${transaction.cash.toStringAsFixed(2)}",
+                            style: pw.TextStyle(
+                              font: regularFont,
+                              fontSize: 9,
+                            ),
+                          ),
+                        ],
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text(
+                            "Change:",
+                            style: pw.TextStyle(
+                              font: regularFont,
+                              fontSize: 9,
+                            ),
+                          ),
+                          pw.Text(
+                            "P${transaction.change.toStringAsFixed(2)}",
+                            style: pw.TextStyle(
+                              font: regularFont,
+                              fontSize: 9,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                pw.Divider(thickness: 1),
+
+                // Footer
                 pw.SizedBox(height: 4),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('TOTAL:', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('P${transaction.total.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-                  ],
+                pw.Text(
+                  "THANK YOU FOR YOUR BUSINESS!",
+                  style: pw.TextStyle(
+                    font: boldFont,
+                    fontSize: 8,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                  textAlign: pw.TextAlign.center,
                 ),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('Cash:', style: const pw.TextStyle(fontSize: 12)),
-                    pw.Text('P${transaction.cash.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 12)),
-                  ],
-                ),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('Change:', style: const pw.TextStyle(fontSize: 12)),
-                    pw.Text('P${transaction.change.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 12)),
-                  ],
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  "Please come again",
+                  style: pw.TextStyle(
+                    font: regularFont,
+                    fontSize: 7,
+                  ),
+                  textAlign: pw.TextAlign.center,
                 ),
                 pw.SizedBox(height: 8),
-                pw.Divider(),
-                pw.SizedBox(height: 8),
-                pw.Center(child: pw.Text('Thank you for your business!', style: const pw.TextStyle(fontSize: 10))),
+                pw.Text(
+                  "This serves as your official receipt",
+                  style: pw.TextStyle(
+                    font: regularFont,
+                    fontSize: 6,
+                    fontStyle: pw.FontStyle.italic,
+                  ),
+                  textAlign: pw.TextAlign.center,
+                ),
               ],
             );
           },
         ),
       );
 
-      await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
+      await Printing.sharePdf(
+        bytes: await pdf.save(),
+        filename: "receipt_$transactionId.pdf",
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -654,6 +885,29 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         );
       }
     }
+  }
+
+  // Helper for thermal receipt row
+  pw.Widget _receiptRow(String label, String value, pw.Font? font) {
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Text(
+          label,
+          style: pw.TextStyle(
+            font: font,
+            fontSize: 8,
+          ),
+        ),
+        pw.Text(
+          value,
+          style: pw.TextStyle(
+            font: font,
+            fontSize: 8,
+          ),
+        ),
+      ],
+    );
   }
 
   void _showPrintDialog() {
@@ -668,12 +922,12 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
 
   Future<void> _printAllTransactions({int? month, int? year}) async {
     try {
-      List<TransactionData> transactionsToPrint = _transactions;
+      List<txn.Transaction> transactionsToPrint = _transactions;
 
       // If month/year specified, filter transactions
       if (month != null && year != null) {
-        transactionsToPrint = _transactions.where((txn) {
-          return txn.transactionAt.month == month && txn.transactionAt.year == year;
+        transactionsToPrint = _transactions.where((t) {
+          return t.transactionAt.month == month && t.transactionAt.year == year;
         }).toList();
       }
 
@@ -687,7 +941,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       }
 
       final pdf = pw.Document();
-      final totalRevenue = transactionsToPrint.fold<double>(0.0, (total, txn) => total + txn.total);
+      final totalRevenue = transactionsToPrint.fold<double>(0.0, (total, t) => total + t.total);
 
       pdf.addPage(
         pw.MultiPage(
@@ -739,14 +993,14 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                       _buildPdfTableCell('Amount', isHeader: true),
                     ],
                   ),
-                  for (final txn in transactionsToPrint)
+                  for (final t in transactionsToPrint)
                     pw.TableRow(
                       children: [
-                        _buildPdfTableCell(DateFormat('MM/dd/yy').format(txn.transactionAt)),
-                        _buildPdfTableCell(txn.customer['name'] ?? 'N/A'),
-                        _buildPdfTableCell(txn.customer['plateNumber'] ?? 'N/A'),
-                        _buildPdfTableCell('${txn.services.length} service(s)'),
-                        _buildPdfTableCell('P${txn.total.toStringAsFixed(2)}'),
+                        _buildPdfTableCell(DateFormat('MM/dd/yy').format(t.transactionAt)),
+                        _buildPdfTableCell(t.customerName.isNotEmpty ? t.customerName : 'N/A'),
+                        _buildPdfTableCell(t.vehiclePlateNumber.isNotEmpty ? t.vehiclePlateNumber : 'N/A'),
+                        _buildPdfTableCell('${t.services.length} service(s)'),
+                        _buildPdfTableCell('P${t.total.toStringAsFixed(2)}'),
                       ],
                     ),
                 ],

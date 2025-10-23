@@ -21,6 +21,7 @@ class AdminStaffHome extends StatefulWidget {
 
 class _AdminStaffHomeState extends State<AdminStaffHome> {
   int _selectedIndex = 0;
+  VoidCallback? _showAddServiceDialogCallback;
   List<InventoryItem> _lowStockItems = [];
 
   // Dashboard data
@@ -701,7 +702,12 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       case "Expenses":
         return const ExpensesScreen();
       case "Services":
-        return const ServicesScreen();
+        return ServicesScreen(
+          onShowAddDialog: (callback) {
+            // Store the callback so FAB can use it
+            _showAddServiceDialogCallback = callback;
+          },
+        );
       case "Scheduling":
         return const SchedulingScreen();
       case "Payroll":
@@ -929,22 +935,22 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
   }
 
   void _showAddServiceDialog() {
-    // Navigate to services screen will show the add dialog
-    // The actual dialog is in services_screen.dart
-    // For now, just show a message to use the + button in services tab
-    if (_selectedIndex != 4) {
-      setState(() => _selectedIndex = 4);
-    }
+    if (_selectedIndex != 5) {
+      // Navigate to Services tab first
+      setState(() => _selectedIndex = 5);
 
-    // Give time for navigation then trigger dialog in services screen
-    Future.delayed(const Duration(milliseconds: 300), () {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please use the menu options to add a service'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    });
+      // Give time for screen to build and register callback
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (_showAddServiceDialogCallback != null) {
+          _showAddServiceDialogCallback!();
+        }
+      });
+    } else {
+      // Already on Services tab, call immediately
+      if (_showAddServiceDialogCallback != null) {
+        _showAddServiceDialogCallback!();
+      }
+    }
   }
 
   /// World-Class Professional Dashboard with Yellow/Black Theme

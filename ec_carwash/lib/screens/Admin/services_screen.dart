@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:ec_carwash/data_models/services_data.dart';
 
 class ServicesScreen extends StatefulWidget {
-  const ServicesScreen({super.key});
+  final Function(VoidCallback)? onShowAddDialog;
+
+  const ServicesScreen({super.key, this.onShowAddDialog});
 
   @override
   State<ServicesScreen> createState() => _ServicesScreenState();
@@ -20,6 +22,13 @@ class _ServicesScreenState extends State<ServicesScreen> {
   void initState() {
     super.initState();
     _loadData();
+
+    // Register the add dialog callback with parent
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (widget.onShowAddDialog != null) {
+        widget.onShowAddDialog!(_showAddServiceDialog);
+      }
+    });
   }
 
   Future<void> _loadData() async {
@@ -578,6 +587,191 @@ class _ServicesScreenState extends State<ServicesScreen> {
                 }
               },
               child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Add new service dialog
+  void _showAddServiceDialog() {
+    final codeController = TextEditingController();
+    final nameController = TextEditingController();
+    final categoryController = TextEditingController();
+    final descriptionController = TextEditingController();
+
+    // All possible vehicle types
+    final List<String> allVehicleTypes = [
+      'Cars',
+      'SUV',
+      'Van',
+      'Pick-Up',
+      'Delivery Truck (S)',
+      'Delivery Truck (L)',
+      'Motorcycle (S)',
+      'Motorcycle (L)',
+      'Tricycle',
+    ];
+
+    // Dynamic vehicle prices map
+    Map<String, TextEditingController> vehicleControllers = {};
+    Map<String, bool> selectedVehicleTypes = {};
+
+    // Initialize controllers
+    for (String type in allVehicleTypes) {
+      vehicleControllers[type] = TextEditingController();
+      selectedVehicleTypes[type] = false;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Add New Service'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: codeController,
+                  decoration: const InputDecoration(labelText: 'Service Code (e.g., EC17)'),
+                  textCapitalization: TextCapitalization.characters,
+                ),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(labelText: 'Service Name'),
+                ),
+                TextField(
+                  controller: categoryController,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                ),
+                TextField(
+                  controller: descriptionController,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                  maxLines: 3,
+                ),
+                const SizedBox(height: 16),
+                const Text('Vehicle Types & Prices:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                ...allVehicleTypes.map((vehicleType) => Column(
+                  children: [
+                    CheckboxListTile(
+                      dense: true,
+                      title: Text(vehicleType),
+                      value: selectedVehicleTypes[vehicleType],
+                      onChanged: (bool? value) {
+                        setDialogState(() {
+                          selectedVehicleTypes[vehicleType] = value ?? false;
+                          if (!(value ?? false)) {
+                            vehicleControllers[vehicleType]!.clear();
+                          }
+                        });
+                      },
+                    ),
+                    if (selectedVehicleTypes[vehicleType] == true)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+                        child: TextField(
+                          controller: vehicleControllers[vehicleType],
+                          decoration: InputDecoration(
+                            labelText: '$vehicleType Price',
+                            prefixText: '₱',
+                          ),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                  ],
+                )),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (codeController.text.isNotEmpty &&
+                    nameController.text.isNotEmpty &&
+                    categoryController.text.isNotEmpty &&
+                    descriptionController.text.isNotEmpty) {
+
+                  // Build prices map
+                  Map<String, double> prices = {};
+                  bool hasValidPrices = true;
+
+                  for (String vehicleType in allVehicleTypes) {
+                    if (selectedVehicleTypes[vehicleType] == true) {
+                      final priceText = vehicleControllers[vehicleType]!.text;
+                      if (priceText.isEmpty) {
+                        hasValidPrices = false;
+                        break;
+                      }
+                      final price = double.tryParse(priceText);
+                      if (price == null) {
+                        hasValidPrices = false;
+                        break;
+                      }
+                      prices[vehicleType] = price;
+                    }
+                  }
+
+                  if (!hasValidPrices || prices.isEmpty) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please enter valid prices for at least one vehicle type')),
+                      );
+                    }
+                    return;
+                  }
+
+                  try {
+                    final newService = Service(
+                      id: '', // Firestore will generate
+                      code: codeController.text.trim().toUpperCase(),
+                      name: nameController.text.trim(),
+                      category: categoryController.text.trim(),
+                      description: descriptionController.text.trim(),
+                      prices: prices,
+                      isActive: true,
+                      createdAt: DateTime.now(),
+                      updatedAt: DateTime.now(),
+                    );
+
+                    await ServicesManager.addService(newService);
+                    await _loadData();
+                    if (mounted) Navigator.pop(context);
+
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Service added successfully!'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error adding service: $e')),
+                      );
+                    }
+                  }
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Please fill in all required fields')),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.yellow.shade700,
+                foregroundColor: Colors.black87,
+              ),
+              child: const Text('Add Service'),
             ),
           ],
         ),

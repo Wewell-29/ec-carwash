@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:ec_carwash/data_models/expense_data.dart';
+import 'package:ec_carwash/utils/csv_importer.dart';
+import 'package:ec_carwash/data_models/unified_transaction_data.dart' as txn_model;
+import 'package:file_picker/file_picker.dart';
+import 'dart:convert';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -16,8 +20,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
 
-  // Peak Operating Time Data (bookings per hour)
-  Map<int, int> _hourlyBookings = {};
+  // Peak Operating Time Data (bookings per time unit - hour/day/month depending on filter)
+  Map<dynamic, int> _peakTimeData = {};
 
   // Top Services Data
   Map<String, double> _serviceRevenue = {};
@@ -82,12 +86,19 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           .where('status', isEqualTo: 'completed')
           .get();
 
+      // Load completed transactions (includes CSV imports and POS transactions)
+      final transactionsSnapshot = await FirebaseFirestore.instance
+          .collection('Transactions')
+          .where('status', isEqualTo: 'completed')
+          .get();
+
       // Process data with date filtering
-      Map<int, int> hourlyBookingCount = {};
+      Map<dynamic, int> peakTimeCount = {};
       Map<String, double> serviceRev = {};
       double totalRev = 0.0;
       int txnCount = 0;
 
+      // Process bookings
       for (final doc in bookingsSnapshot.docs) {
         final data = doc.data();
         final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
@@ -107,9 +118,43 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
         totalRev += total;
 
-        // Peak operating time analysis (count bookings per hour)
-        final hour = createdAt.hour;
-        hourlyBookingCount[hour] = (hourlyBookingCount[hour] ?? 0) + 1;
+        // Peak time analysis - varies by filter
+        dynamic timeKey;
+        switch (_selectedFilter) {
+          case 'today':
+            // Group by hour (0-23)
+            timeKey = createdAt.hour;
+            break;
+          case 'weekly':
+            // Group by day of week (1=Monday, 7=Sunday)
+            timeKey = createdAt.weekday;
+            break;
+          case 'monthly':
+            // Group by day of month (1-31)
+            timeKey = createdAt.day;
+            break;
+          case 'yearly':
+            // Group by month (1-12)
+            timeKey = createdAt.month;
+            break;
+          case 'custom':
+            // Determine based on date range span
+            final daysDiff = endDate.difference(startDate).inDays;
+            if (daysDiff <= 1) {
+              timeKey = createdAt.hour; // Hours for single day
+            } else if (daysDiff <= 31) {
+              timeKey = createdAt.day; // Days for up to a month
+            } else if (daysDiff <= 366) {
+              timeKey = createdAt.month; // Months for up to a year
+            } else {
+              timeKey = createdAt.year; // Years for longer periods
+            }
+            break;
+          default:
+            timeKey = createdAt.hour;
+        }
+
+        peakTimeCount[timeKey] = (peakTimeCount[timeKey] ?? 0) + 1;
 
         // Top services analysis
         if (services != null) {
@@ -117,6 +162,69 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             final serviceName = service['serviceName'] ?? 'Unknown';
             final price = (service['price'] as num?)?.toDouble() ?? 0.0;
             serviceRev[serviceName] = (serviceRev[serviceName] ?? 0.0) + price;
+          }
+        }
+      }
+
+      // Process transactions (CSV imports, POS transactions)
+      for (final doc in transactionsSnapshot.docs) {
+        final data = doc.data();
+        final transactionAt = (data['transactionAt'] as Timestamp?)?.toDate();
+
+        // Filter by date range
+        if (transactionAt == null ||
+            transactionAt.isBefore(startDate) ||
+            transactionAt.isAfter(endDate)) {
+          continue;
+        }
+
+        txnCount++;
+        final total = (data['total'] as num?)?.toDouble() ?? 0.0;
+        final services = data['services'] as List?;
+
+        totalRev += total;
+
+        // Peak time analysis
+        dynamic timeKey;
+        switch (_selectedFilter) {
+          case 'today':
+            timeKey = transactionAt.hour;
+            break;
+          case 'weekly':
+            timeKey = transactionAt.day;
+            break;
+          case 'monthly':
+            timeKey = transactionAt.day;
+            break;
+          case 'yearly':
+            timeKey = transactionAt.month;
+            break;
+          case 'custom':
+            final daysDiff = endDate.difference(startDate).inDays;
+            if (daysDiff <= 1) {
+              timeKey = transactionAt.hour;
+            } else if (daysDiff <= 31) {
+              timeKey = transactionAt.day;
+            } else if (daysDiff <= 366) {
+              timeKey = transactionAt.month;
+            } else {
+              timeKey = transactionAt.year;
+            }
+            break;
+          default:
+            timeKey = transactionAt.hour;
+        }
+
+        peakTimeCount[timeKey] = (peakTimeCount[timeKey] ?? 0) + 1;
+
+        // Top services analysis
+        if (services != null) {
+          for (final service in services) {
+            final serviceName = service['serviceName'] ??
+                               service['serviceCode'] ?? 'Unknown';
+            final price = (service['price'] as num?)?.toDouble() ?? 0.0;
+            final quantity = (service['quantity'] as num?)?.toInt() ?? 1;
+            serviceRev[serviceName] = (serviceRev[serviceName] ?? 0.0) + (price * quantity);
           }
         }
       }
@@ -141,7 +249,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
       if (mounted) {
         setState(() {
-          _hourlyBookings = hourlyBookingCount;
+          _peakTimeData = peakTimeCount;
           _serviceRevenue = serviceRev;
           _expensesByCategory = expensesByCat;
           _totalRevenue = totalRev;
@@ -261,6 +369,21 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               style: TextStyle(
                 fontWeight: _selectedFilter == 'custom' ? FontWeight.bold : FontWeight.normal,
               ),
+            ),
+          ),
+          const Spacer(),
+          // Import CSV Button
+          ElevatedButton.icon(
+            onPressed: _showImportCSVDialog,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade600,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            icon: const Icon(Icons.upload_file, size: 20),
+            label: const Text(
+              'Import CSV',
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -472,18 +595,86 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildPeakOperatingTimeChart() {
-    // Create complete hour range from 8 AM to 6 PM with 0 bookings as default
-    final Map<int, int> completeHours = {};
-    for (int hour = 8; hour <= 18; hour++) {
-      completeHours[hour] = _hourlyBookings[hour] ?? 0;
+    // Determine title and labels based on filter
+    String chartTitle;
+    String chartSubtitle;
+    Map<int, int> completeData = {};
+
+    switch (_selectedFilter) {
+      case 'today':
+        chartTitle = 'Peak Operating Hours';
+        chartSubtitle = 'Busiest times of the day';
+        // Hours from 8 AM to 6 PM
+        for (int hour = 8; hour <= 18; hour++) {
+          completeData[hour] = _peakTimeData[hour] ?? 0;
+        }
+        break;
+      case 'weekly':
+        chartTitle = 'Peak Operating Days';
+        chartSubtitle = 'Busiest days of the week';
+        // Days 1-7 (Mon-Sun)
+        for (int day = 1; day <= 7; day++) {
+          completeData[day] = _peakTimeData[day] ?? 0;
+        }
+        break;
+      case 'monthly':
+        chartTitle = 'Peak Operating Days';
+        chartSubtitle = 'Busiest days of the month';
+        // Days 1-31
+        for (int day = 1; day <= 31; day++) {
+          completeData[day] = _peakTimeData[day] ?? 0;
+        }
+        break;
+      case 'yearly':
+        chartTitle = 'Peak Operating Months';
+        chartSubtitle = 'Busiest months of the year';
+        // Months 1-12
+        for (int month = 1; month <= 12; month++) {
+          completeData[month] = _peakTimeData[month] ?? 0;
+        }
+        break;
+      case 'custom':
+        // Determine based on data keys
+        if (_peakTimeData.isEmpty) {
+          chartTitle = 'Peak Times';
+          chartSubtitle = 'No data available';
+        } else {
+          final sampleKey = _peakTimeData.keys.first;
+          if (sampleKey is int && sampleKey >= 0 && sampleKey <= 23) {
+            chartTitle = 'Peak Operating Hours';
+            chartSubtitle = 'Busiest times in selected period';
+            for (int hour = 8; hour <= 18; hour++) {
+              completeData[hour] = _peakTimeData[hour] ?? 0;
+            }
+          } else if (sampleKey is int && sampleKey >= 1 && sampleKey <= 31) {
+            chartTitle = 'Peak Operating Days';
+            chartSubtitle = 'Busiest days in selected period';
+            for (int day = 1; day <= 31; day++) {
+              completeData[day] = _peakTimeData[day] ?? 0;
+            }
+          } else {
+            chartTitle = 'Peak Operating Months';
+            chartSubtitle = 'Busiest months in selected period';
+            for (int month = 1; month <= 12; month++) {
+              completeData[month] = _peakTimeData[month] ?? 0;
+            }
+          }
+        }
+        break;
+      default:
+        chartTitle = 'Peak Operating Hours';
+        chartSubtitle = 'Busiest times of the day';
+        for (int hour = 8; hour <= 18; hour++) {
+          completeData[hour] = _peakTimeData[hour] ?? 0;
+        }
     }
 
-    final maxBookings = completeHours.values.isEmpty
+    final maxBookings = completeData.values.isEmpty
         ? 1
-        : completeHours.values.reduce((a, b) => a > b ? a : b);
+        : completeData.values.reduce((a, b) => a > b ? a : b);
 
     // If no bookings, show empty state
-    if (maxBookings == 0 || completeHours.isEmpty) {
+    if (maxBookings == 0 || completeData.isEmpty) {
       return Card(
         color: Colors.yellow.shade50,
         elevation: 2,
@@ -500,9 +691,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 children: [
                   Icon(Icons.access_time, color: Colors.black87, size: 20),
                   const SizedBox(width: 8),
-                  const Text(
-                    'Peak Operating Hours',
-                    style: TextStyle(
+                  Text(
+                    chartTitle,
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: Colors.black87,
@@ -542,9 +733,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               children: [
                 Icon(Icons.access_time, color: Colors.black87, size: 20),
                 const SizedBox(width: 8),
-                const Text(
-                  'Peak Operating Hours',
-                  style: TextStyle(
+                Text(
+                  chartTitle,
+                  style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: Colors.black87,
@@ -554,7 +745,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Busiest times of the day',
+              chartSubtitle,
               style: TextStyle(
                 fontSize: 13,
                 color: Colors.black.withValues(alpha: 0.6),
@@ -567,20 +758,32 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 BarChartData(
                   alignment: BarChartAlignment.spaceAround,
                   maxY: (maxBookings * 1.2).toDouble(),
-                  barTouchData: BarTouchData(enabled: true),
+                  barTouchData: BarTouchData(
+                    enabled: true,
+                    touchTooltipData: BarTouchTooltipData(
+                      getTooltipColor: (group) => Colors.black87,
+                      tooltipRoundedRadius: 8,
+                      tooltipPadding: const EdgeInsets.all(8),
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        String label = _getTooltipLabel(group.x.toInt(), _selectedFilter);
+                        return BarTooltipItem(
+                          '$label\n${rod.toY.toInt()} bookings',
+                          const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                   titlesData: FlTitlesData(
                     show: true,
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
                         getTitlesWidget: (value, meta) {
-                          final hour = value.toInt();
-                          final period = hour >= 12 ? 'PM' : 'AM';
-                          final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-                          return Text(
-                            '$displayHour$period',
-                            style: const TextStyle(fontSize: 10, color: Colors.black87),
-                          );
+                          return _getBottomTitle(value.toInt(), _selectedFilter);
                         },
                       ),
                     ),
@@ -588,7 +791,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 35,
+                        interval: maxBookings > 10 ? null : (maxBookings > 5 ? 2 : 1),
                         getTitlesWidget: (value, meta) {
+                          if (value == 0 || value > maxBookings) return const SizedBox.shrink();
                           return Text(
                             '${value.toInt()}',
                             style: const TextStyle(fontSize: 10, color: Colors.black87),
@@ -605,7 +810,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     horizontalInterval: (maxBookings * 1.2) / 5,
                   ),
                   borderData: FlBorderData(show: false),
-                  barGroups: completeHours.entries.map((entry) {
+                  barGroups: completeData.entries.map((entry) {
                     return BarChartGroupData(
                       x: entry.key,
                       barRods: [
@@ -626,6 +831,97 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         ),
       ),
     );
+  }
+
+  Widget _getBottomTitle(int value, String filter) {
+    String label;
+    switch (filter) {
+      case 'today':
+        // Hours (8 AM - 6 PM)
+        final period = value >= 12 ? 'PM' : 'AM';
+        final displayHour = value == 0 ? 12 : (value > 12 ? value - 12 : value);
+        label = '$displayHour$period';
+        break;
+      case 'weekly':
+        // Days of week
+        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        label = value >= 1 && value <= 7 ? days[value - 1] : '';
+        break;
+      case 'monthly':
+        // Days of month (show key days to avoid crowding)
+        if (value == 1 || value % 5 == 0) {
+          label = value.toString();
+        } else {
+          label = '';
+        }
+        break;
+      case 'yearly':
+        // Months
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        label = value >= 1 && value <= 12 ? months[value - 1] : '';
+        break;
+      case 'custom':
+        // Determine based on value range
+        if (value >= 0 && value <= 23) {
+          // Hours
+          final period = value >= 12 ? 'PM' : 'AM';
+          final displayHour = value == 0 ? 12 : (value > 12 ? value - 12 : value);
+          label = '$displayHour$period';
+        } else if (value >= 1 && value <= 31) {
+          // Days
+          label = value % 5 == 0 || value == 1 ? value.toString() : '';
+        } else if (value >= 1 && value <= 12) {
+          // Months
+          const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          label = months[value - 1];
+        } else {
+          label = value.toString();
+        }
+        break;
+      default:
+        label = value.toString();
+    }
+    return Text(
+      label,
+      style: const TextStyle(fontSize: 10, color: Colors.black87),
+    );
+  }
+
+  String _getTooltipLabel(int value, String filter) {
+    switch (filter) {
+      case 'today':
+        // Hours (full format)
+        final period = value >= 12 ? 'PM' : 'AM';
+        final displayHour = value == 0 ? 12 : (value > 12 ? value - 12 : value);
+        return '$displayHour:00 $period';
+      case 'weekly':
+        // Days of week (full name)
+        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        return value >= 1 && value <= 7 ? days[value - 1] : 'Day $value';
+      case 'monthly':
+        // Days of month (with ordinal)
+        return 'Day $value';
+      case 'yearly':
+        // Months (full name)
+        const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        return value >= 1 && value <= 12 ? months[value - 1] : 'Month $value';
+      case 'custom':
+        // Determine based on value range
+        if (value >= 0 && value <= 23) {
+          final period = value >= 12 ? 'PM' : 'AM';
+          final displayHour = value == 0 ? 12 : (value > 12 ? value - 12 : value);
+          return '$displayHour:00 $period';
+        } else if (value >= 1 && value <= 31) {
+          return 'Day $value';
+        } else if (value >= 1 && value <= 12) {
+          const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+          return months[value - 1];
+        } else {
+          return 'Day $value';
+        }
+      default:
+        return value.toString();
+    }
   }
 
   Widget _buildTopServicesChart() {
@@ -920,6 +1216,287 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         },
       ),
     );
+  }
+
+  /// Show CSV Import Dialog
+  Future<void> _showImportCSVDialog() async {
+    try {
+      // Pick CSV file
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        withData: true,
+      );
+
+      if (result == null || result.files.isEmpty) {
+        return; // User cancelled
+      }
+
+      final file = result.files.first;
+      if (file.bytes == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not read file')),
+          );
+        }
+        return;
+      }
+
+      // Decode CSV content
+      final csvContent = utf8.decode(file.bytes!);
+      debugPrint('CSV content length: ${csvContent.length}');
+      debugPrint('First 200 chars: ${csvContent.substring(0, csvContent.length > 200 ? 200 : csvContent.length)}');
+
+      // Validate CSV format
+      if (!CSVImporter.validateCSVFormat(csvContent)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Invalid CSV format. Expected columns: Date, Time, Team, Service, Price'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+        return;
+      }
+
+      // Show confirmation dialog with preview
+      if (mounted) {
+        await _showImportConfirmationDialog(csvContent, file.name);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error picking file: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Show import confirmation dialog with preview
+  Future<void> _showImportConfirmationDialog(
+    String csvContent,
+    String fileName,
+  ) async {
+    try {
+      // Parse CSV to preview
+      final transactions = CSVImporter.parseCSV(csvContent);
+
+      if (transactions.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No valid transactions found in CSV')),
+          );
+        }
+        return;
+      }
+
+      // Show preview dialog
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.upload_file, color: Colors.blue),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Import CSV Transactions',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      fileName,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 600,
+            height: 400,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.blue.shade700),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Found ${transactions.length} transaction(s) to import',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Preview (first 5 rows):',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SingleChildScrollView(
+                      child: DataTable(
+                        border: TableBorder.all(color: Colors.grey.shade300),
+                        headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+                        columns: const [
+                          DataColumn(label: Text('Date')),
+                          DataColumn(label: Text('Team')),
+                          DataColumn(label: Text('Plate')),
+                          DataColumn(label: Text('Services')),
+                          DataColumn(label: Text('Amount')),
+                        ],
+                        rows: transactions.take(5).map((txn) {
+                          return DataRow(cells: [
+                            DataCell(Text(
+                              '${txn.transactionAt.month}/${txn.transactionAt.day}/${txn.transactionAt.year}',
+                            )),
+                            DataCell(Text(txn.assignedTeam ?? 'N/A')),
+                            DataCell(Text(txn.vehiclePlateNumber)),
+                            DataCell(Text(
+                              txn.services.map((s) => s.serviceCode).join(', '),
+                            )),
+                            DataCell(Text('₱${txn.total.toStringAsFixed(2)}')),
+                          ]);
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade600,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.check),
+              label: const Text('Import All'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed == true && mounted) {
+        await _performImport(transactions);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error parsing CSV: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Perform the actual import
+  Future<void> _performImport(List<txn_model.Transaction> transactions) async {
+    if (transactions.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No transactions to import'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Show progress dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Row(
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(width: 20),
+            Text('Importing ${transactions.length} transactions...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      debugPrint('Starting import of ${transactions.length} transactions');
+
+      // Resolve service names from Firestore
+      debugPrint('Resolving service names...');
+      await CSVImporter.resolveServiceNames(transactions);
+
+      // Import to Firestore
+      debugPrint('Importing to Firestore...');
+      final importedCount = await CSVImporter.importToFirestore(transactions);
+      debugPrint('Import completed: $importedCount transactions');
+
+      if (mounted) {
+        Navigator.pop(context); // Close progress dialog
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '✓ Successfully imported $importedCount transaction(s)',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+
+        // Reload analytics data
+        await _loadAnalyticsData();
+      }
+    } catch (e, stackTrace) {
+      debugPrint('Import error: $e');
+      debugPrint('Stack trace: $stackTrace');
+
+      if (mounted) {
+        Navigator.pop(context); // Close progress dialog
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error importing: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 10),
+          ),
+        );
+      }
+    }
   }
 }
 
