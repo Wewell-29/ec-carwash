@@ -501,6 +501,192 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
     }
   }
 
+  Future<void> _showEditPlateDialog(Customer vehicle) async {
+    final plateController = TextEditingController(text: vehicle.plateNumber);
+    String? errorText;
+    bool checking = false;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> validate(String value) async {
+              final plate = value.trim().toUpperCase();
+              if (plate.isEmpty) {
+                setDialogState(() => errorText = 'Plate number is required');
+                return;
+              }
+              // If unchanged, it's valid
+              if (plate == vehicle.plateNumber.toUpperCase()) {
+                setDialogState(() => errorText = null);
+                return;
+              }
+              setDialogState(() {
+                checking = true;
+                errorText = null;
+              });
+              final unique = await _isPlateNumberUnique(plate);
+              setDialogState(() {
+                checking = false;
+                errorText = unique ? null : 'This plate number is already registered';
+              });
+            }
+
+            return AlertDialog(
+              title: const Text('Edit Plate Number'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: plateController,
+                    decoration: InputDecoration(
+                      labelText: 'Plate Number',
+                      border: const OutlineInputBorder(),
+                      errorText: errorText,
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                    onChanged: (v) {
+                      // debounce-lite: validate on change but avoid spamming
+                      // simple approach: validate after short delay
+                    },
+                  ),
+                  if (checking)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8.0),
+                      child: LinearProgressIndicator(minHeight: 2),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final plate = plateController.text.trim().toUpperCase();
+                    if (plate.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Plate number cannot be empty'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                      return;
+                    }
+                    if (plate != vehicle.plateNumber.toUpperCase()) {
+                      final unique = await _isPlateNumberUnique(plate);
+                      if (!unique) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('This plate number is already registered'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                    }
+                    Navigator.pop(context);
+                    await _updatePlateNumber(vehicle, plate);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.yellow[700],
+                    foregroundColor: Colors.black,
+                  ),
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _updatePlateNumber(Customer vehicle, String newPlate) async {
+    setState(() => _isLoading = true);
+    try {
+      final updated = vehicle.copyWith(plateNumber: newPlate.toUpperCase());
+      await CustomerManager.saveCustomer(updated);
+      await _loadUserVehicles();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Plate number updated successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating plate number: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _confirmDeleteVehicle(Customer vehicle) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Vehicle'),
+        content: Text('Remove ${vehicle.plateNumber} from your account? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _deleteVehicle(vehicle);
+    }
+  }
+
+  Future<void> _deleteVehicle(Customer vehicle) async {
+    if (vehicle.id == null) return;
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseFirestore.instance.collection('Customers').doc(vehicle.id).delete();
+      await _loadUserVehicles();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Vehicle deleted'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting vehicle: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
   // --- Drawer navigation helper ---
   void _navigateFromDrawer(String menu) {
     setState(() {
@@ -819,10 +1005,40 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                             ],
                           ],
                         ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () => _showEditContactDialog(vehicle),
-                          tooltip: 'Edit contact number',
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (value) {
+                            if (value == 'edit_plate') {
+                              _showEditPlateDialog(vehicle);
+                            } else if (value == 'edit_contact') {
+                              _showEditContactDialog(vehicle);
+                            } else if (value == 'delete') {
+                              _confirmDeleteVehicle(vehicle);
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: 'edit_plate',
+                              child: ListTile(
+                                leading: Icon(Icons.directions_car),
+                                title: Text('Edit plate number'),
+                              ),
+                            ),
+                            const PopupMenuItem(
+                              value: 'edit_contact',
+                              child: ListTile(
+                                leading: Icon(Icons.phone),
+                                title: Text('Edit contact'),
+                              ),
+                            ),
+                            const PopupMenuDivider(),
+                            const PopupMenuItem(
+                              value: 'delete',
+                              child: ListTile(
+                                leading: Icon(Icons.delete, color: Colors.red),
+                                title: Text('Delete vehicle'),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );

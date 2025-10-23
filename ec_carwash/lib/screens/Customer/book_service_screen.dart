@@ -4,12 +4,15 @@ import 'package:ec_carwash/data_models/booking_data_unified.dart';
 import 'package:ec_carwash/data_models/relationship_manager.dart';
 import 'package:ec_carwash/data_models/customer_data_unified.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import 'cart_item.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'customer_home.dart';
 import 'booking_history.dart';
 import 'account_info_screen.dart';
 import 'notifications_screen.dart';
+import '../../services/google_sign_in_service.dart';
+import '../login_page.dart';
 
 class BookServiceScreen extends StatefulWidget {
   final Map<String, dynamic>? rebookData;
@@ -25,6 +28,11 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   bool _isLoading = false;
+  // Locale-aware currency formatter for PHP
+  final NumberFormat _currency =
+      NumberFormat.currency(locale: 'en_PH', symbol: '₱', decimalDigits: 0);
+
+  String formatCurrency(num value) => _currency.format(value);
 
   // Services from Firestore
   List<Service> _services = [];
@@ -173,6 +181,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     for (final service in _services) {
       data[service.code] = {
         'name': service.name,
+        'description': service.description,
         'prices': service.prices,
       };
     }
@@ -180,7 +189,12 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   }
 
   // --- CART FUNCTIONS ---
-  void _addToCart(String key, String vehicleType, int price) {
+  bool _addToCart(String key, String vehicleType, int price) {
+    // Prevent duplicates: only one of the same service at a time
+    final alreadyInCart = _cart.any((c) => c.serviceKey == key);
+    if (alreadyInCart) {
+      return false;
+    }
     setState(() {
       _cart.add(
         CartItem(
@@ -191,6 +205,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
         ),
       );
     });
+    return true;
   }
 
   void _removeFromCart(CartItem item) {
@@ -200,7 +215,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   }
 
   // --- DATE & TIME PICKERS ---
-  void _pickDate() async {
+  Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
       firstDate: DateTime.now(),
@@ -210,7 +225,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
     if (picked != null) setState(() => _selectedDate = picked);
   }
 
-  void _pickTime() async {
+  Future<void> _pickTime() async {
     final picked = await showTimePicker(
       context: context,
       initialTime: _selectedTime ?? TimeOfDay.now(),
@@ -327,19 +342,21 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (context) {
-        final selectedDateTime = _combinedSelectedDateTime();
-        final dateText = selectedDateTime != null
-            ? "${selectedDateTime.year}-${selectedDateTime.month.toString().padLeft(2, '0')}-${selectedDateTime.day.toString().padLeft(2, '0')}"
-            : null;
-        final timeText = selectedDateTime != null
-            ? TimeOfDay(
-                hour: selectedDateTime.hour,
-                minute: selectedDateTime.minute,
-              ).format(context)
-            : null;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final selectedDateTime = _combinedSelectedDateTime();
+            final dateText = selectedDateTime != null
+                ? "${selectedDateTime.year}-${selectedDateTime.month.toString().padLeft(2, '0')}-${selectedDateTime.day.toString().padLeft(2, '0')}"
+                : null;
+            final timeText = selectedDateTime != null
+                ? TimeOfDay(
+                    hour: selectedDateTime.hour,
+                    minute: selectedDateTime.minute,
+                  ).format(context)
+                : null;
 
-        // allow sheet to scroll when keyboard is present
-        return DraggableScrollableSheet(
+            // allow sheet to scroll when keyboard is present
+            return DraggableScrollableSheet(
           expand: false,
           initialChildSize: 0.75,
           minChildSize: 0.4,
@@ -381,7 +398,20 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                                     Icons.delete,
                                     color: Colors.red,
                                   ),
-                                  onPressed: () => _removeFromCart(item),
+                                  onPressed: () {
+                                    _removeFromCart(item);
+                                    // Auto-refresh the sheet to reflect changes immediately
+                                    Navigator.pop(context);
+                                    _showCart();
+                                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Removed "${item.serviceName}"'),
+                                        duration: const Duration(milliseconds: 900),
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
+                                  },
                                 ),
                               );
                             },
@@ -437,12 +467,21 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                           StatefulBuilder(
                             builder: (context, setDialogState) {
                               return DropdownButtonFormField<Customer>(
+                                isDense: false,
+                                isExpanded: true,
+                                itemHeight: 56,
                                 decoration: const InputDecoration(
                                   labelText: "Select Vehicle",
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.directions_car),
                                 ),
                                 value: _selectedVehicle,
+                                selectedItemBuilder: (context) => _userVehicles
+                                    .map((v) => Text(
+                                          '${v.plateNumber} — ${v.vehicleType ?? "Unknown"} • ${v.contactNumber}',
+                                          overflow: TextOverflow.ellipsis,
+                                        ))
+                                    .toList(),
                                 items: _userVehicles.map((vehicle) {
                                   return DropdownMenuItem(
                                     value: vehicle,
@@ -525,7 +564,10 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                                 children: [
                                   Expanded(
                                     child: OutlinedButton.icon(
-                                      onPressed: _pickDate,
+                                      onPressed: () async {
+                                        await _pickDate();
+                                        setSheetState(() {});
+                                      },
                                       icon: const Icon(Icons.event, size: 18),
                                       label: Text(
                                         _selectedDate == null
@@ -547,7 +589,10 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: OutlinedButton.icon(
-                                      onPressed: _pickTime,
+                                      onPressed: () async {
+                                        await _pickTime();
+                                        setSheetState(() {});
+                                      },
                                       icon: const Icon(Icons.access_time, size: 18),
                                       label: Text(
                                         _selectedTime == null
@@ -603,12 +648,14 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
             );
           },
         );
+          },
+        );
       },
     );
   }
 
   // --- Drawer navigation helper ---
-  void _navigateFromDrawer(String menu) {
+  Future<void> _navigateFromDrawer(String menu) async {
     setState(() {
       _selectedMenu = menu;
     });
@@ -637,7 +684,35 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
         MaterialPageRoute(builder: (context) => const AccountInfoScreen()),
       );
     } else if (menu == 'Logout') {
-      // TODO: implement logout
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Logout'),
+          content: const Text('Are you sure you want to logout?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Logout'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) {
+        await GoogleSignInService.signOut();
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+        );
+      }
     }
   }
 
@@ -910,7 +985,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
 // --- SERVICES SCREEN ---
 class VehicleServicesScreen extends StatefulWidget {
   final String vehicleType;
-  final Function(String, String, int) onAddToCart;
+  final bool Function(String, String, int) onAddToCart;
   final List<CartItem> cart;
   final VoidCallback showCart;
   final Map<String, Map<String, dynamic>> productsData;
@@ -1046,7 +1121,8 @@ class _VehicleServicesScreenState extends State<VehicleServicesScreen> {
                     padding: const EdgeInsets.all(16),
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    childAspectRatio: 0.95,
+                    // Make tiles a bit taller to avoid overflow
+                    childAspectRatio: 0.8,
                     children: filteredServices.map((entry) {
                       final key = entry.key;
                       final name = entry.value['name'];
@@ -1071,6 +1147,8 @@ class _VehicleServicesScreenState extends State<VehicleServicesScreen> {
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                 ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 6),
                               Text(
@@ -1103,11 +1181,28 @@ class _VehicleServicesScreenState extends State<VehicleServicesScreen> {
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton(
-                                  onPressed: () => widget.onAddToCart(
-                                    key,
-                                    widget.vehicleType,
-                                    price,
-                                  ),
+                                  onPressed: () {
+                                    final added = widget.onAddToCart(
+                                      key,
+                                      widget.vehicleType,
+                                      price,
+                                    );
+                                    // Rebuild local state so badge updates immediately
+                                    setState(() {});
+                                    // Toast based on result
+                                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          added
+                                              ? 'Added "$name" to cart'
+                                              : '"$name" is already in your cart',
+                                        ),
+                                        duration: const Duration(seconds: 1),
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
+                                  },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.yellow[700],
                                     foregroundColor: Colors.black,

@@ -1,6 +1,8 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'local_notification_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../data_models/notification_data.dart';
 
 /// Top-level function to handle background messages
 @pragma('vm:entry-point')
@@ -87,6 +89,20 @@ class FirebaseMessagingService {
         payload: message.data.toString(),
       );
     }
+
+    // Persist to Firestore for in-app notifications list
+    try {
+      final email = FirebaseAuth.instance.currentUser?.email;
+      if (email != null) {
+        await NotificationManager.createNotification(
+          userId: email,
+          title: message.notification?.title ?? 'EC Carwash',
+          message: message.notification?.body ?? 'You have a new notification',
+          type: (message.data['type'] ?? 'general').toString(),
+          metadata: message.data.isEmpty ? null : Map<String, dynamic>.from(message.data),
+        );
+      }
+    } catch (_) {}
   }
 
   /// Handle notification tap when app is in background or terminated
@@ -95,6 +111,20 @@ class FirebaseMessagingService {
       print('Notification opened app: ${message.messageId}');
       print('Data: ${message.data}');
     }
+
+    // Persist to Firestore as the user likely expects to see it in the app list
+    try {
+      final email = FirebaseAuth.instance.currentUser?.email;
+      if (email != null) {
+        NotificationManager.createNotification(
+          userId: email,
+          title: message.notification?.title ?? 'EC Carwash',
+          message: message.notification?.body ?? 'You have a new notification',
+          type: (message.data['type'] ?? 'general').toString(),
+          metadata: message.data.isEmpty ? null : Map<String, dynamic>.from(message.data),
+        );
+      }
+    } catch (_) {}
 
     // Navigate to specific screen based on notification data
     // You can add custom navigation logic here

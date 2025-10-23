@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/google_sign_in_service.dart';
+import '../login_page.dart';
 import 'package:intl/intl.dart';
 import 'package:ec_carwash/data_models/notification_data.dart';
 import 'customer_home.dart';
@@ -76,8 +78,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
 
     if (shouldLogout == true && mounted) {
-      await _auth.signOut();
-      // Navigate to login screen or handle logout
+      await GoogleSignInService.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (route) => false,
+      );
     }
   }
 
@@ -219,8 +225,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
 
     // Navigate based on notification type
-    if (notification.type == 'booking_approved' ||
-        notification.type == 'booking_completed' ||
+    if (notification.type == 'booking_approved') {
+      if (mounted) {
+        // Navigate to CustomerHome with Approved tab selected
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const CustomerHome(initialTabIndex: 1)),
+        );
+      }
+    } else if (notification.type == 'booking_completed' ||
         notification.type == 'booking_cancelled') {
       if (mounted) {
         Navigator.push(

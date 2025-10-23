@@ -4,12 +4,17 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'book_service_screen.dart';
 import 'booking_history.dart';
+import 'reservation_detail_screen.dart';
 import 'account_info_screen.dart';
 import 'notifications_screen.dart';
 import '../../services/fcm_token_manager.dart';
+import '../../services/google_sign_in_service.dart';
+import '../login_page.dart';
 
 class CustomerHome extends StatefulWidget {
-  const CustomerHome({super.key});
+  final int initialTabIndex; // 0 = Pending, 1 = Approved
+
+  const CustomerHome({super.key, this.initialTabIndex = 0});
 
   @override
   State<CustomerHome> createState() => _CustomerHomeState();
@@ -85,6 +90,9 @@ class _CustomerHomeState extends State<CustomerHome> {
 
     return DefaultTabController(
       length: 2,
+      initialIndex: (widget.initialTabIndex >= 0 && widget.initialTabIndex <= 1)
+          ? widget.initialTabIndex
+          : 0,
       child: Scaffold(
         appBar: AppBar(
           title: const Text("Customer Dashboard"),
@@ -152,7 +160,37 @@ class _CustomerHomeState extends State<CustomerHome> {
               ListTile(
                 leading: const Icon(Icons.logout),
                 title: const Text("Logout"),
-                onTap: () => Navigator.pop(context),
+                onTap: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Logout'),
+                      content: const Text('Are you sure you want to logout?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Logout'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed == true) {
+                    await GoogleSignInService.signOut();
+                    if (!mounted) return;
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const LoginPage()),
+                      (route) => false,
+                    );
+                  }
+                },
               ),
             ],
           ),
@@ -248,6 +286,20 @@ class _CustomerHomeState extends State<CustomerHome> {
                     const Icon(Icons.arrow_forward_ios, size: 16),
                   ],
                 ),
+                onTap: () async {
+                  if (status == 'pending') {
+                    final docId = bookings[index].id;
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ReservationDetailScreen(
+                          bookingId: docId,
+                          initialData: booking,
+                        ),
+                      ),
+                    );
+                  }
+                },
               ),
             );
           },
