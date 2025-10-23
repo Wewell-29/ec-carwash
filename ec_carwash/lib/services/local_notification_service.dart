@@ -34,6 +34,17 @@ class LocalNotificationService {
       },
     );
 
+    // Ensure Android notification channel exists for FCM background notifications
+    const AndroidNotificationChannel bookingChannel = AndroidNotificationChannel(
+      'booking_channel',
+      'Booking Notifications',
+      description: 'Notifications for booking status updates',
+      importance: Importance.high,
+    );
+    await _notificationsPlugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(bookingChannel);
+
     // Request permissions for Android 13+
     if (defaultTargetPlatform == TargetPlatform.android) {
       await _notificationsPlugin

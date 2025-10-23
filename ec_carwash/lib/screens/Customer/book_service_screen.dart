@@ -28,6 +28,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   bool _isLoading = false;
+  bool _isRebookMode = false; // when true, vehicle/services are fixed (read-only)
   // Locale-aware currency formatter for PHP
   final NumberFormat _currency =
       NumberFormat.currency(locale: 'en_PH', symbol: '₱', decimalDigits: 0);
@@ -49,6 +50,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   @override
   void initState() {
     super.initState();
+    _isRebookMode = widget.rebookData != null;
     _loadServices();
     _loadUserVehicles();
     _handleRebookData();
@@ -740,29 +742,31 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
           ),
         ),
         title: const Text("Book a Service"),
-        actions: [
-          Stack(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.shopping_cart),
-                onPressed: _showCart,
-              ),
-              if (_cart.isNotEmpty)
-                Positioned(
-                  right: 6,
-                  top: 6,
-                  child: CircleAvatar(
-                    radius: 10,
-                    backgroundColor: Colors.red,
-                    child: Text(
-                      "${_cart.length}",
-                      style: const TextStyle(fontSize: 12, color: Colors.white),
+        actions: _isRebookMode
+            ? []
+            : [
+                Stack(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.shopping_cart),
+                      onPressed: _showCart,
                     ),
-                  ),
+                    if (_cart.isNotEmpty)
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: CircleAvatar(
+                          radius: 10,
+                          backgroundColor: Colors.red,
+                          child: Text(
+                            "${_cart.length}",
+                            style: const TextStyle(fontSize: 12, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-            ],
-          ),
-        ],
+              ],
       ),
       drawer: Drawer(
         child: ListView(
@@ -828,8 +832,10 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
         ),
       ),
 
-      // Vehicle and services selection
-      body: _userVehicles.isEmpty
+      // Vehicle/services selection or rebook read-only view
+      body: _isRebookMode
+          ? _buildRebookReadonlyView()
+          : _userVehicles.isEmpty
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(32.0),
@@ -951,6 +957,197 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                 );
               }).toList(),
             ),
+    );
+  }
+
+  // Read-only view when rebooking: shows fixed vehicle and services, only date/time editable
+  Widget _buildRebookReadonlyView() {
+    final total = _cart.fold<int>(0, (sum, item) => sum + item.price);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Card(
+            elevation: 3,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Vehicle',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_selectedVehicle != null)
+                    Row(
+                      children: [
+                        Icon(_getVehicleIcon(_selectedVehicle!.vehicleType ?? ''), color: Colors.blue),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _selectedVehicle!.plateNumber,
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                (_selectedVehicle!.vehicleType ?? 'Unknown'),
+                                style: TextStyle(color: Colors.grey[600]),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    const Text('Vehicle not found for rebook. Please go back and try again.'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            elevation: 3,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Services',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_cart.isEmpty)
+                    const Text('No services were found in the previous booking.')
+                  else
+                    ListView.separated(
+                      separatorBuilder: (_, __) => const Divider(height: 12),
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _cart.length,
+                      itemBuilder: (_, i) {
+                        final item = _cart[i];
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(item.serviceName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  Text(item.vehicleType, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                            Text('₱${item.price}')
+                          ],
+                        );
+                      },
+                    ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Total', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text('₱$total', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ],
+                  )
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Date and Time Selection (same UI as in cart sheet)
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: (_selectedDate == null || _selectedTime == null) ? Colors.orange : Colors.green,
+                width: 2,
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.calendar_today,
+                      size: 20,
+                      color: (_selectedDate == null || _selectedTime == null) ? Colors.orange : Colors.green,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      (_selectedDate == null || _selectedTime == null) ? 'Select Date & Time (Required)' : 'Date & Time Selected',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: (_selectedDate == null || _selectedTime == null) ? Colors.orange : Colors.green,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await _pickDate();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.event, size: 18),
+                        label: Text(
+                          _selectedDate == null ? "Pick Date" : "${_selectedDate!.toLocal()}".split(' ')[0],
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _selectedDate == null ? Colors.orange : Colors.black,
+                          side: BorderSide(color: _selectedDate == null ? Colors.orange : Colors.grey),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await _pickTime();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.access_time, size: 18),
+                        label: Text(
+                          _selectedTime == null ? "Pick Time" : _selectedTime!.format(context),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _selectedTime == null ? Colors.orange : Colors.black,
+                          side: BorderSide(color: _selectedTime == null ? Colors.orange : Colors.grey),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _submitBooking,
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 50),
+              backgroundColor: Colors.yellow[700],
+              foregroundColor: Colors.black,
+            ),
+            child: const Text("Book Now"),
+          ),
+        ],
+      ),
     );
   }
 

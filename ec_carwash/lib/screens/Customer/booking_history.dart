@@ -68,23 +68,37 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
   }
 
   void _rebookTransaction(Map<String, dynamic> transactionData) {
-    // Extract the customer info and services from the completed transaction
-    final customer = (transactionData['customer'] as Map<String, dynamic>?) ?? {};
-    final plateNumber = customer['plateNumber'] as String?;
+    // Support both unified and legacy transaction shapes
+    final legacyCustomer =
+        (transactionData['customer'] as Map<String, dynamic>?) ?? {};
+    final plateNumber = (transactionData['vehiclePlateNumber'] ??
+            legacyCustomer['plateNumber'])
+        ?.toString();
 
-    // Get the services from the transaction
-    final rawList = (transactionData['services'] ?? transactionData['items']) as List<dynamic>? ?? [];
+    // Get the services from the transaction (new: services, legacy: items)
+    final rawList = (transactionData['services'] ?? transactionData['items'])
+            as List<dynamic>? ??
+        [];
     final services = rawList.cast<Map<String, dynamic>>();
 
-    if (plateNumber == null || services.isEmpty) {
+    if (plateNumber == null || plateNumber.isEmpty || services.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Unable to rebook: Missing vehicle or service information'),
+          content: Text(
+              'Unable to rebook: Missing vehicle or service information'),
           backgroundColor: Colors.red,
         ),
       );
       return;
     }
+
+    // Prepare a minimal customer object if legacy is missing
+    final customer = legacyCustomer.isNotEmpty
+        ? legacyCustomer
+        : {
+            'plateNumber': plateNumber,
+            'name': transactionData['customerName'] ?? '',
+          };
 
     // Navigate to the booking screen with the rebook data
     Navigator.push(
@@ -199,107 +213,150 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
   /// COMPLETED = from Transactions where customer.email == user.email
   /// Reads `services` first, falls back to legacy `items`.
   Widget _buildCompletedTab(User user) {
-    final stream = FirebaseFirestore.instance
-        .collection('Transactions')
-        .where('customer.email', isEqualTo: user.email)
-        .orderBy('createdAt', descending: true)
-        .snapshots();
+    // Resolve the unified customerId for this user (new schema)
+    final customerFuture = FirebaseFirestore.instance
+        .collection('Customers')
+        .where('email', isEqualTo: user.email)
+        .limit(1)
+        .get();
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: stream,
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
+    return FutureBuilder<QuerySnapshot>(
+      future: customerFuture,
+      builder: (context, custSnap) {
+        // While resolving the customer, show progress
+        if (custSnap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (!snap.hasData || snap.data!.docs.isEmpty) {
-          return const Center(child: Text('No completed transactions.'));
+
+        // Determine stream based on available schema
+        Stream<QuerySnapshot> stream;
+        if (custSnap.hasData && custSnap.data!.docs.isNotEmpty) {
+          final customerId = custSnap.data!.docs.first.id;
+          // New schema: filter by customerId
+          stream = FirebaseFirestore.instance
+              .collection('Transactions')
+              .where('customerId', isEqualTo: customerId)
+              .orderBy('transactionAt', descending: true)
+              .snapshots();
+        } else {
+          // Legacy fallback: nested customer.email (may be absent in new data)
+          stream = FirebaseFirestore.instance
+              .collection('Transactions')
+              .where('customer.email', isEqualTo: user.email)
+              .orderBy('createdAt', descending: true)
+              .snapshots();
         }
 
-        final docs = snap.data!.docs;
+        return StreamBuilder<QuerySnapshot>(
+          stream: stream,
+          builder: (context, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (!snap.hasData || snap.data!.docs.isEmpty) {
+              return const Center(child: Text('No completed transactions.'));
+            }
 
-        return ListView.builder(
-          itemCount: docs.length,
-          itemBuilder: (_, i) {
-            final data = docs[i].data() as Map<String, dynamic>;
+            final docs = snap.data!.docs;
+            return ListView.builder(
+              itemCount: docs.length,
+              itemBuilder: (_, i) {
+                final data = docs[i].data() as Map<String, dynamic>;
 
-            final customer = (data['customer'] as Map<String, dynamic>?) ?? {};
-            final plate = (customer['plateNumber'] ?? 'N/A').toString();
+                // Plate number from unified field, fallback to legacy nested customer
+                final legacyCustomer =
+                    (data['customer'] as Map<String, dynamic>?) ?? {};
+                final plate = (data['vehiclePlateNumber'] ??
+                        legacyCustomer['plateNumber'] ??
+                        'N/A')
+                    .toString();
 
-            // Use unified datetime field (transactionAt is the timestamp)
-            final scheduledDateTime = data['transactionAt'] ?? data['createdAt'];
-            final formattedDateTime = _formatDateTime(scheduledDateTime);
+                // Use unified timestamp when available
+                final scheduledDateTime =
+                    data['transactionAt'] ?? data['createdAt'];
+                final formattedDateTime =
+                    _formatDateTime(scheduledDateTime);
 
-            // Prefer new schema `services`, fallback to old `items`
-            final rawList =
-                (data['services'] ?? data['items']) as List<dynamic>? ?? [];
-            final entries = rawList.cast<Map<String, dynamic>>();
+                // Prefer new schema `services`, fallback to old `items`
+                final rawList = (data['services'] ?? data['items'])
+                        as List<dynamic>? ??
+                    [];
+                final entries = rawList.cast<Map<String, dynamic>>();
 
-            // Build services label robustly
-            final servicesLabel = entries.isNotEmpty
-                ? entries
-                      .map((e) {
-                        final code = (e['serviceCode'] ?? e['code'] ?? '')
-                            .toString();
-                        final name = (e['serviceName'] ?? '').toString();
-                        final vt = (e['vehicleType'] ?? '').toString();
-                        final title = name.isNotEmpty ? name : code;
-                        return vt.isNotEmpty ? '$title ($vt)' : title;
-                      })
-                      .join(', ')
-                : 'N/A';
+                // Build services label robustly
+                final servicesLabel = entries.isNotEmpty
+                    ? entries
+                        .map((e) {
+                          final code =
+                              (e['serviceCode'] ?? e['code'] ?? '')
+                                  .toString();
+                          final name =
+                              (e['serviceName'] ?? '').toString();
+                          final vt =
+                              (e['vehicleType'] ?? '').toString();
+                          final title = name.isNotEmpty ? name : code;
+                          return vt.isNotEmpty
+                              ? '$title ($vt)'
+                              : title;
+                        })
+                        .join(', ')
+                    : 'N/A';
 
-            final total = (data['total'] ?? 0).toString();
+                final total = (data['total'] ?? 0).toString();
 
-            return Card(
-              margin: const EdgeInsets.all(12),
-              elevation: 3,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                children: [
-                  ListTile(
-                    title: Text('Plate: $plate'),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Date: $formattedDateTime'),
-                        const SizedBox(height: 4),
-                        Text('Services: $servicesLabel'),
-                        const SizedBox(height: 4),
-                        Text('Total: ₱$total'),
-                      ],
-                    ),
-                    trailing: const Chip(
-                      label: Text(
-                        'COMPLETED',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                return Card(
+                  margin: const EdgeInsets.all(12),
+                  elevation: 3,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        title: Text('Plate: $plate'),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Date: $formattedDateTime'),
+                            const SizedBox(height: 4),
+                            Text('Services: $servicesLabel'),
+                            const SizedBox(height: 4),
+                            Text('Total: ₱$total'),
+                          ],
+                        ),
+                        trailing: const Chip(
+                          label: Text(
+                            'COMPLETED',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          backgroundColor: Colors.green,
                         ),
                       ),
-                      backgroundColor: Colors.green,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: () => _rebookTransaction(data),
-                          icon: const Icon(Icons.refresh, size: 18),
-                          label: const Text('Rebook'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.yellow[700],
-                            foregroundColor: Colors.black,
-                          ),
+                      Padding(
+                        padding:
+                            const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: () => _rebookTransaction(data),
+                              icon: const Icon(Icons.refresh, size: 18),
+                              label: const Text('Rebook'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.yellow[700],
+                                foregroundColor: Colors.black,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             );
           },
         );
