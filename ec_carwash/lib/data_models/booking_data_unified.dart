@@ -345,6 +345,7 @@ class BookingManager {
 
       final bookingData = bookingDoc.data() as Map<String, dynamic>;
       final userEmail = bookingData['userEmail'] as String?;
+      final source = bookingData['source'] as String?;
 
       // Update the booking status
       await _firestore.collection(_collection).doc(bookingId).update({
@@ -352,8 +353,8 @@ class BookingManager {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      // Create in-app notification for the customer
-      if (userEmail != null && userEmail.isNotEmpty) {
+      // Create in-app notification ONLY for mobile app bookings (not POS bookings)
+      if (userEmail != null && userEmail.isNotEmpty && source == 'customer-app') {
         String notificationTitle = '';
         String notificationMessage = '';
         String notificationType = '';

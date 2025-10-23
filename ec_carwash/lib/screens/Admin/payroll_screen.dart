@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 
 class PayrollScreen extends StatefulWidget {
   const PayrollScreen({super.key});
@@ -26,7 +27,6 @@ class _PayrollScreenState extends State<PayrollScreen> {
     'Team A': null,
     'Team B': null,
   };
-  String _selectedPeriod = 'today'; // today, week, month, all
 
   @override
   void initState() {
@@ -34,103 +34,321 @@ class _PayrollScreenState extends State<PayrollScreen> {
     _loadPayrollData();
   }
 
-  Future<void> _loadDisbursementStatus(DateTime startDate, DateTime endDate) async {
-    try {
-      // Create unique ID for this period and team
-      final periodId = '${_selectedPeriod}_${startDate.year}_${startDate.month}_${startDate.day}';
-
-      for (final team in ['Team A', 'Team B']) {
-        final disbursementDoc = await FirebaseFirestore.instance
-            .collection('PayrollDisbursements')
-            .doc('${periodId}_$team')
-            .get();
-
-        if (disbursementDoc.exists) {
-          final data = disbursementDoc.data()!;
-          _teamDisbursementStatus[team] = data['isDisbursed'] ?? false;
-          _teamDisbursementDate[team] = (data['disbursedAt'] as Timestamp?)?.toDate();
-        } else {
-          _teamDisbursementStatus[team] = false;
-          _teamDisbursementDate[team] = null;
-        }
-      }
-    } catch (e) {
-      debugPrint('Error loading disbursement status: $e');
-    }
-  }
-
   Future<void> _disburseSalary(String teamName, double commission) async {
     try {
-      // Show confirmation dialog
-      final confirm = await showDialog<bool>(
+      // Initialize with today
+      DateTime disbursementStartDate = DateTime.now();
+      DateTime disbursementEndDate = DateTime.now();
+      DateTime disbursementDate = DateTime.now();
+      String selectedPeriodType = 'single'; // 'custom' or 'single'
+
+      final result = await showDialog<Map<String, dynamic>>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Confirm Disbursement', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Disburse salary to $teamName?'),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.yellow.shade50,
-                  border: Border.all(color: Colors.black87),
-                  borderRadius: BorderRadius.circular(8),
-                ),
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) {
+            String formatDisbursementPeriod() {
+              if (selectedPeriodType == 'single') {
+                return DateFormat('MMMM dd, yyyy').format(disbursementStartDate);
+              } else {
+                if (disbursementStartDate.year == disbursementEndDate.year &&
+                    disbursementStartDate.month == disbursementEndDate.month &&
+                    disbursementStartDate.day == disbursementEndDate.day) {
+                  return DateFormat('MMMM dd, yyyy').format(disbursementStartDate);
+                }
+                return '${DateFormat('MMM dd, yyyy').format(disbursementStartDate)} - ${DateFormat('MMM dd, yyyy').format(disbursementEndDate)}';
+              }
+            }
+
+            return AlertDialog(
+              title: const Text('Disburse Salary', style: TextStyle(fontWeight: FontWeight.bold)),
+              content: SingleChildScrollView(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Team: $teamName', style: const TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text('Amount: ₱${commission.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text('Period: $_selectedPeriod', style: const TextStyle(fontSize: 12)),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.yellow.shade50,
+                        border: Border.all(color: Colors.black87),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Team: $teamName', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          Text('Total Earnings: ₱${commission.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    const SizedBox(height: 12),
+
+                    // Period Type Selection
+                    const Text('Select Disbursement Period:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Text('Single Day'),
+                            selected: selectedPeriodType == 'single',
+                            onSelected: (selected) {
+                              if (selected) {
+                                setDialogState(() {
+                                  selectedPeriodType = 'single';
+                                  disbursementEndDate = disbursementStartDate;
+                                });
+                              }
+                            },
+                            selectedColor: Colors.yellow.shade700,
+                            backgroundColor: Colors.grey.shade200,
+                            labelStyle: TextStyle(
+                              color: selectedPeriodType == 'single' ? Colors.black87 : Colors.black54,
+                              fontWeight: selectedPeriodType == 'single' ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Text('Date Range'),
+                            selected: selectedPeriodType == 'custom',
+                            onSelected: (selected) {
+                              if (selected) {
+                                setDialogState(() => selectedPeriodType = 'custom');
+                              }
+                            },
+                            selectedColor: Colors.yellow.shade700,
+                            backgroundColor: Colors.grey.shade200,
+                            labelStyle: TextStyle(
+                              color: selectedPeriodType == 'custom' ? Colors.black87 : Colors.black54,
+                              fontWeight: selectedPeriodType == 'custom' ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Period Selection
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.date_range, color: Colors.yellow.shade700, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  formatDisbursementPeriod(),
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              if (selectedPeriodType == 'single') {
+                                // Single day picker
+                                final picked = await showDatePicker(
+                                  context: context,
+                                  initialDate: disbursementStartDate,
+                                  firstDate: DateTime(2020),
+                                  lastDate: DateTime.now().add(const Duration(days: 365)),
+                                  builder: (context, child) {
+                                    return Theme(
+                                      data: ThemeData.light().copyWith(
+                                        colorScheme: ColorScheme.light(
+                                          primary: Colors.yellow.shade700,
+                                          onPrimary: Colors.black87,
+                                        ),
+                                      ),
+                                      child: child!,
+                                    );
+                                  },
+                                );
+                                if (picked != null) {
+                                  setDialogState(() {
+                                    disbursementStartDate = picked;
+                                    disbursementEndDate = picked;
+                                  });
+                                }
+                              } else {
+                                // Date range picker
+                                final picked = await showDateRangePicker(
+                                  context: context,
+                                  firstDate: DateTime(2020),
+                                  lastDate: DateTime.now().add(const Duration(days: 365)),
+                                  initialDateRange: DateTimeRange(
+                                    start: disbursementStartDate,
+                                    end: disbursementEndDate,
+                                  ),
+                                  builder: (context, child) {
+                                    return Theme(
+                                      data: ThemeData.light().copyWith(
+                                        colorScheme: ColorScheme.light(
+                                          primary: Colors.yellow.shade700,
+                                          onPrimary: Colors.black87,
+                                        ),
+                                      ),
+                                      child: child!,
+                                    );
+                                  },
+                                );
+                                if (picked != null) {
+                                  setDialogState(() {
+                                    disbursementStartDate = picked.start;
+                                    disbursementEndDate = DateTime(
+                                      picked.end.year,
+                                      picked.end.month,
+                                      picked.end.day,
+                                      23, 59, 59,
+                                    );
+                                  });
+                                }
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.yellow.shade700,
+                              foregroundColor: Colors.black87,
+                              minimumSize: const Size(double.infinity, 36),
+                            ),
+                            icon: const Icon(Icons.edit_calendar, size: 18),
+                            label: Text(
+                              selectedPeriodType == 'single' ? 'Pick Day' : 'Pick Range',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    const SizedBox(height: 12),
+
+                    // Disbursement Date
+                    const Text('Disbursement Date:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.calendar_today, color: Colors.yellow.shade700, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  DateFormat('MMMM dd, yyyy').format(disbursementDate),
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: disbursementDate,
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime.now().add(const Duration(days: 365)),
+                                builder: (context, child) {
+                                  return Theme(
+                                    data: ThemeData.light().copyWith(
+                                      colorScheme: ColorScheme.light(
+                                        primary: Colors.yellow.shade700,
+                                        onPrimary: Colors.black87,
+                                      ),
+                                    ),
+                                    child: child!,
+                                  );
+                                },
+                              );
+                              if (picked != null) {
+                                setDialogState(() => disbursementDate = picked);
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.yellow.shade700,
+                              foregroundColor: Colors.black87,
+                              minimumSize: const Size(double.infinity, 36),
+                            ),
+                            icon: const Icon(Icons.edit_calendar, size: 18),
+                            label: const Text('Change Date', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.yellow.shade700,
-                foregroundColor: Colors.black87,
-              ),
-              child: const Text('Confirm Disbursement', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, {
+                    'confirmed': true,
+                    'disbursementStartDate': disbursementStartDate,
+                    'disbursementEndDate': disbursementEndDate,
+                    'disbursementDate': disbursementDate,
+                  }),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.yellow.shade700,
+                    foregroundColor: Colors.black87,
+                  ),
+                  child: const Text('Confirm Disbursement', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
         ),
       );
 
-      if (confirm != true) return;
+      if (result == null || result['confirmed'] != true) return;
 
-      // Calculate period dates for ID
-      DateTime startDate = DateTime.now();
-      switch (_selectedPeriod) {
-        case 'today':
-          startDate = DateTime(startDate.year, startDate.month, startDate.day);
-          break;
-        case 'week':
-          startDate = startDate.subtract(Duration(days: startDate.weekday - 1));
-          startDate = DateTime(startDate.year, startDate.month, startDate.day);
-          break;
-        case 'month':
-          startDate = DateTime(startDate.year, startDate.month, 1);
-          break;
-        case 'all':
-          startDate = DateTime(2020, 1, 1);
-          break;
-      }
+      final selectedDisbursementStartDate = result['disbursementStartDate'] as DateTime;
+      final selectedDisbursementEndDate = result['disbursementEndDate'] as DateTime;
+      final selectedDisbursementDate = result['disbursementDate'] as DateTime;
 
-      final periodId = '${_selectedPeriod}_${startDate.year}_${startDate.month}_${startDate.day}';
+      // Create period ID based on selected disbursement period
+      final periodId = '${selectedDisbursementStartDate.year}${selectedDisbursementStartDate.month.toString().padLeft(2, '0')}${selectedDisbursementStartDate.day.toString().padLeft(2, '0')}_${selectedDisbursementEndDate.year}${selectedDisbursementEndDate.month.toString().padLeft(2, '0')}${selectedDisbursementEndDate.day.toString().padLeft(2, '0')}';
       final docId = '${periodId}_$teamName';
+
+      // Check if already disbursed for this specific period
+      final existingDoc = await FirebaseFirestore.instance
+          .collection('PayrollDisbursements')
+          .doc(docId)
+          .get();
+
+      if (existingDoc.exists && existingDoc.data()?['isDisbursed'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Salary for this period has already been disbursed to $teamName'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
 
       // Save disbursement record
       await FirebaseFirestore.instance
@@ -139,18 +357,16 @@ class _PayrollScreenState extends State<PayrollScreen> {
           .set({
         'teamName': teamName,
         'amount': commission,
-        'period': _selectedPeriod,
-        'periodStartDate': Timestamp.fromDate(startDate),
+        'periodStartDate': Timestamp.fromDate(selectedDisbursementStartDate),
+        'periodEndDate': Timestamp.fromDate(selectedDisbursementEndDate),
+        'disbursementDate': Timestamp.fromDate(selectedDisbursementDate),
         'isDisbursed': true,
         'disbursedAt': FieldValue.serverTimestamp(),
         'disbursedBy': 'Admin', // TODO: Get from auth
       });
 
-      // Update local state
-      setState(() {
-        _teamDisbursementStatus[teamName] = true;
-        _teamDisbursementDate[teamName] = DateTime.now();
-      });
+      // Reload data to update status
+      await _loadPayrollData();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -173,31 +389,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
     setState(() => _isLoading = true);
 
     try {
-      DateTime startDate = DateTime.now();
-      DateTime endDate = DateTime.now();
-
-      // Calculate date range based on selected period
-      switch (_selectedPeriod) {
-        case 'today':
-          startDate = DateTime(startDate.year, startDate.month, startDate.day);
-          endDate = startDate.add(const Duration(days: 1));
-          break;
-        case 'week':
-          startDate = startDate.subtract(Duration(days: startDate.weekday - 1));
-          startDate = DateTime(startDate.year, startDate.month, startDate.day);
-          endDate = startDate.add(const Duration(days: 7));
-          break;
-        case 'month':
-          startDate = DateTime(startDate.year, startDate.month, 1);
-          endDate = DateTime(startDate.year, startDate.month + 1, 1);
-          break;
-        case 'all':
-          startDate = DateTime(2020, 1, 1); // Far past date
-          endDate = DateTime.now().add(const Duration(days: 1));
-          break;
-      }
-
-      // Query completed bookings only
+      // Query completed bookings only (show all time totals)
       final bookingsSnapshot = await FirebaseFirestore.instance
           .collection('Bookings')
           .where('status', isEqualTo: 'completed')
@@ -218,22 +410,9 @@ class _PayrollScreenState extends State<PayrollScreen> {
           continue;
         }
 
-        // Filter by date if not 'all'
-        if (_selectedPeriod != 'all') {
-          final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
-          if (createdAt == null ||
-              createdAt.isBefore(startDate) ||
-              createdAt.isAfter(endDate)) {
-            continue;
-          }
-        }
-
         commissions[team] = commissions[team]! + commission;
         counts[team] = counts[team]! + 1;
       }
-
-      // Load disbursement status for this period
-      await _loadDisbursementStatus(startDate, endDate);
 
       setState(() {
         _teamCommissions = commissions;
@@ -292,72 +471,55 @@ class _PayrollScreenState extends State<PayrollScreen> {
   Widget _buildFilters(double totalCommission, int totalJobs) {
     return Container(
       padding: const EdgeInsets.all(16),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            children: [
-              // Total Commission Badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.yellow.shade50,
-                  border: Border.all(color: Colors.black87, width: 1.5),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
+          // Total Commission Badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.yellow.shade50,
+              border: Border.all(color: Colors.black87, width: 1.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.account_balance_wallet, color: Colors.black87, size: 20),
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.account_balance_wallet, color: Colors.black87, size: 20),
-                    const SizedBox(width: 8),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '₱${totalCommission.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          '$totalJobs jobs',
-                          style: TextStyle(
-                            color: Colors.black.withValues(alpha: 0.6),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
+                    Text(
+                      '₱${totalCommission.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      '$totalJobs total jobs',
+                      style: TextStyle(
+                        color: Colors.black.withValues(alpha: 0.6),
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
-              ),
-              const Spacer(),
-              OutlinedButton.icon(
-                onPressed: _loadPayrollData,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.black87,
-                  backgroundColor: Colors.yellow.shade50,
-                  side: const BorderSide(color: Colors.black87, width: 1.5),
-                ),
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Refresh'),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
-          // Date Filters
-          Row(
-            children: [
-              _buildFilterChip('Today', 'today'),
-              const SizedBox(width: 8),
-              _buildFilterChip('Week', 'week'),
-              const SizedBox(width: 8),
-              _buildFilterChip('Month', 'month'),
-              const SizedBox(width: 8),
-              _buildFilterChip('All', 'all'),
-            ],
+          const Spacer(),
+          OutlinedButton.icon(
+            onPressed: _loadPayrollData,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.black87,
+              backgroundColor: Colors.yellow.shade50,
+              side: const BorderSide(color: Colors.black87, width: 1.5),
+            ),
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Refresh'),
           ),
         ],
       ),
@@ -409,7 +571,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
                         ),
                       ),
                       Text(
-                        'Commission for ${_selectedPeriod == 'today' ? 'today' : _selectedPeriod == 'week' ? 'this week' : _selectedPeriod == 'month' ? 'this month' : 'all time'}',
+                        'Total Commissions (All Time)',
                         style: TextStyle(
                           fontSize: 14,
                           color: Colors.black.withValues(alpha: 0.6),
@@ -555,28 +717,4 @@ class _PayrollScreenState extends State<PayrollScreen> {
     );
   }
 
-  Widget _buildFilterChip(String label, String value) {
-    final isSelected = _selectedPeriod == value;
-    return ChoiceChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          color: isSelected ? Colors.black87 : Colors.black.withValues(alpha: 0.7),
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          fontSize: 13,
-        ),
-      ),
-      selected: isSelected,
-      onSelected: (selected) {
-        setState(() => _selectedPeriod = value);
-        _loadPayrollData();
-      },
-      selectedColor: Colors.yellow.shade700,
-      backgroundColor: Colors.grey.shade200,
-      side: BorderSide(
-        color: isSelected ? Colors.black87 : Colors.transparent,
-        width: 1.5,
-      ),
-    );
-  }
 }

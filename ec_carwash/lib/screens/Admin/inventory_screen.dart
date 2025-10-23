@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:ec_carwash/data_models/inventory_data.dart';
 
 class InventoryScreen extends StatefulWidget {
@@ -730,6 +731,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   border: OutlineInputBorder(),
                 ),
                 keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
               ),
               const SizedBox(height: 12),
               TextField(

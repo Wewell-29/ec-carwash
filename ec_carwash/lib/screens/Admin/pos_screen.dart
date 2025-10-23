@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:ec_carwash/data_models/services_data.dart';
 import 'package:ec_carwash/data_models/inventory_data.dart';
 import 'package:ec_carwash/data_models/customer_data_unified.dart';
+import 'package:ec_carwash/utils/responsive_helper.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -80,7 +81,11 @@ class _POSScreenState extends State<POSScreen> {
   Map<String, Map<String, dynamic>> get servicesData {
     final Map<String, Map<String, dynamic>> data = {};
     for (final service in _services) {
-      data[service.code] = {'name': service.name, 'prices': service.prices};
+      data[service.code] = {
+        'name': service.name,
+        'description': service.description,
+        'prices': service.prices
+      };
     }
     return data;
   }
@@ -128,34 +133,29 @@ class _POSScreenState extends State<POSScreen> {
     // Get the service name from servicesData
     final serviceName = servicesData[code]?["name"] ?? code;
 
-    final index = cart.indexWhere(
-      (item) => item["code"] == code && item["category"] == category,
-    );
+    // Check if service already exists in cart (by code only, not category)
+    final index = cart.indexWhere((item) => item["code"] == code);
 
     if (index >= 0) {
-      // Already in cart - increase quantity and show notification
-      setState(() {
-        cart[index]["quantity"] = (cart[index]["quantity"] ?? 0) + 1;
-      });
-
+      // Service already in cart - block duplicate and show warning
       if (mounted) {
-        final currentQty = cart[index]["quantity"] as int;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.info, color: Colors.white),
+                const Icon(Icons.warning, color: Colors.white),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('$serviceName already in cart! Quantity increased to $currentQty'),
+                  child: Text('$serviceName is already in your cart! Cannot add the same service twice.'),
                 ),
               ],
             ),
-            backgroundColor: Colors.yellow.shade700,
+            backgroundColor: Colors.red.shade600,
             duration: const Duration(seconds: 2),
           ),
         );
       }
+      return; // Don't add to cart
     } else {
       // New item - add to cart
       setState(() {
@@ -373,11 +373,29 @@ class _POSScreenState extends State<POSScreen> {
         currentCustomer = base.copyWith(id: customerId);
         _currentCustomerId = customerId;
         _vehicleTypeForCustomer = _selectedVehicleType;
+        // Close the new customer form to show selected customer display
+        _showNewCustomerForm = false;
+        // Clear search results
+        _searchResults.clear();
+        isSearching = false;
+        _hasSearched = false;
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Customer saved successfully')),
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Customer "${nameController.text}" saved and selected successfully!'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green.shade600,
+            duration: const Duration(seconds: 3),
+          ),
         );
       }
     } catch (e) {
@@ -508,9 +526,7 @@ class _POSScreenState extends State<POSScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isWide = screenWidth > 700;
-    final isTablet = screenWidth > 600 && screenWidth <= 1024; // iPad mini range
+    final responsive = context.responsive;
     final codes = servicesData.keys.toList();
 
     codes.sort((a, b) {
@@ -531,171 +547,192 @@ class _POSScreenState extends State<POSScreen> {
       return getCodeNumber(a).compareTo(getCodeNumber(b));
     });
 
-    return Row(
-      children: [
-        // Product Codes Grid
-        Expanded(
-          flex: isTablet ? 3 : 4, // Reduce grid space for tablets
-          child: GridView.builder(
-            padding: EdgeInsets.all(isTablet ? 8 : 16), // Smaller padding for tablets
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: isTablet
-                  ? 3  // Fewer columns for tablets to prevent overflow
-                  : screenWidth > 1400
-                  ? 6
-                  : screenWidth > 1200
-                  ? 5
-                  : 4,
-              childAspectRatio: isTablet ? 0.9 : 0.85, // Slightly taller cards for tablets
-              crossAxisSpacing: isTablet ? 6 : 8,
-              mainAxisSpacing: isTablet ? 6 : 8,
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Row(
+          children: [
+            // Product Codes Grid
+            Expanded(
+              flex: responsive.isTablet ? 3 : 4,
+              child: OrientationBuilder(
+                builder: (context, orientation) {
+                  return GridView.builder(
+                    padding: EdgeInsets.all(responsive.spacing),
+                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: responsive.gridItemMaxWidth,
+                      childAspectRatio: responsive.cardAspectRatio,
+                      crossAxisSpacing: responsive.spacing,
+                      mainAxisSpacing: responsive.spacing,
+                    ),
+                    itemCount: codes.length,
+                    itemBuilder: (context, index) {
+                      final code = codes[index];
+                      final product = servicesData[code];
+                      if (product == null) return const SizedBox();
+
+                      // Check if service is applicable for current vehicle type
+                      final prices = product["prices"] as Map<String, dynamic>;
+                      final bool isApplicable = _vehicleTypeForCustomer == null ||
+                                               _vehicleTypeForCustomer!.isEmpty ||
+                                               prices.containsKey(_vehicleTypeForCustomer);
+
+                      return Opacity(
+                        opacity: isApplicable ? 1.0 : 0.4,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: isApplicable ? () => _handleAddService(code) : null,
+                            splashColor: isApplicable ? Colors.yellow.shade200 : null,
+                            highlightColor: isApplicable ? Colors.yellow.shade100 : null,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                // Modern gradient with brand colors
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Colors.white,
+                                    Colors.yellow.shade50,
+                                    Colors.white,
+                                  ],
+                                  stops: const [0.0, 0.5, 1.0],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                                // Thin black stroke as requested
+                                border: Border.all(
+                                  color: Colors.black87,
+                                  width: 1.0,
+                                ),
+                                // Enhanced shadow for depth
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.08),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.04),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Padding(
+                                padding: EdgeInsets.all(responsive.spacing),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    // Service code chip with brand styling
+                                    Container(
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: responsive.isTablet ? 8 : 12,
+                                        vertical: responsive.isTablet ? 4 : 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: [
+                                            Colors.yellow.shade700,
+                                            Colors.yellow.shade800,
+                                          ],
+                                        ),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: Colors.black54,
+                                          width: 0.5,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.2),
+                                            blurRadius: 3,
+                                            offset: const Offset(0, 1),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Text(
+                                        _getDisplayCode(code, responsive.isTablet),
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: responsive.isTablet ? 14 : 18,
+                                          color: Colors.black87,
+                                          letterSpacing: 0.3,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    // Service name and description with better typography
+                                    Expanded(
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            product["name"],
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: responsive.fontSize(mobile: 10, tablet: 10, desktop: 11),
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.grey.shade800,
+                                              height: 1.1,
+                                              letterSpacing: 0.1,
+                                            ),
+                                            maxLines: 3,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          // Show description only on tablet and desktop, hide on mobile
+                                          if (!responsive.isMobile && product["description"] != null && product["description"].toString().isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              product["description"],
+                                              textAlign: TextAlign.center,
+                                              style: const TextStyle(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w400,
+                                                color: Colors.grey,
+                                                height: 1.2,
+                                                letterSpacing: 0.1,
+                                              ),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    // Add a subtle price indicator at the bottom
+                                    Container(
+                                      width: double.infinity,
+                                      height: 3,
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            Colors.yellow.shade600,
+                                            Colors.yellow.shade400,
+                                            Colors.yellow.shade600,
+                                          ],
+                                        ),
+                                        borderRadius: BorderRadius.circular(2),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
-            itemCount: codes.length,
-            itemBuilder: (context, index) {
-              final code = codes[index];
-              final product = servicesData[code];
-              if (product == null) return const SizedBox();
-
-              // Check if service is applicable for current vehicle type
-              final prices = product["prices"] as Map<String, dynamic>;
-              final bool isApplicable = _vehicleTypeForCustomer == null ||
-                                       _vehicleTypeForCustomer!.isEmpty ||
-                                       prices.containsKey(_vehicleTypeForCustomer);
-
-              return Opacity(
-                opacity: isApplicable ? 1.0 : 0.4,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: isApplicable ? () => _handleAddService(code) : null,
-                    splashColor: isApplicable ? Colors.yellow.shade200 : null,
-                    highlightColor: isApplicable ? Colors.yellow.shade100 : null,
-                    child: Container(
-                    decoration: BoxDecoration(
-                      // Modern gradient with brand colors
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Colors.white,
-                          Colors.yellow.shade50,
-                          Colors.white,
-                        ],
-                        stops: const [0.0, 0.5, 1.0],
-                      ),
-                      borderRadius: BorderRadius.circular(12),
-                      // Thin black stroke as requested
-                      border: Border.all(
-                        color: Colors.black87,
-                        width: 1.0,
-                      ),
-                      // Enhanced shadow for depth
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.08),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.04),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Padding(
-                      padding: EdgeInsets.all(isTablet ? 8.0 : 12.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // Service code chip with brand styling
-                          Container(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isTablet ? 10 : 12,
-                              vertical: isTablet ? 6 : 8,
-                            ),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [
-                                  Colors.yellow.shade700,
-                                  Colors.yellow.shade800,
-                                ],
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: Colors.black54,
-                                width: 0.5,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.2),
-                                  blurRadius: 3,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                            child: Text(
-                              _getDisplayCode(code, isTablet),
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: isTablet ? 16 : 18,
-                                color: Colors.black87,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ),
-                          SizedBox(height: isTablet ? 6 : 8),
-                          // Service name with better typography
-                          Expanded(
-                            child: Center(
-                              child: Text(
-                                product["name"],
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: isTablet ? 11 : 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.grey.shade800,
-                                  height: 1.2,
-                                  letterSpacing: 0.2,
-                                ),
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                          // Add a subtle price indicator at the bottom
-                          Container(
-                            width: double.infinity,
-                            height: 3,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.yellow.shade600,
-                                  Colors.yellow.shade400,
-                                  Colors.yellow.shade600,
-                                ],
-                              ),
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                    ),
-                  ),
-              );
-            },
-          ),
-        ),
 
         // Side panel
-        if (isWide)
+        if (responsive.width > 700)
           Expanded(
-            flex: isTablet ? 3 : 2, // Increase side panel space for tablets
+            flex: responsive.isTablet ? 3 : 2,
             child: Column(
               children: [
                 // Dynamic sizing based on search state
@@ -710,7 +747,9 @@ class _POSScreenState extends State<POSScreen> {
               ],
             ),
           ),
-      ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -2033,10 +2072,14 @@ class _POSScreenState extends State<POSScreen> {
       );
 
       // 👤 Customer (unified shape)
+      final customerName = nameController.text.trim().isEmpty
+          ? "Did Not Specify"
+          : nameController.text.trim();
+
       final customerMap = {
         "id": _currentCustomerId ?? currentCustomer?.id,
         "plateNumber": plateController.text.trim().toUpperCase(),
-        "name": nameController.text.trim(),
+        "name": customerName,
         "email": emailController.text.trim(),
         "contactNumber": phoneController.text.trim(),
         "vehicleType": _vehicleTypeForCustomer,

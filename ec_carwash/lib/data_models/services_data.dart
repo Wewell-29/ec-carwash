@@ -407,6 +407,20 @@ List<Service> initialServices = [
     createdAt: DateTime.now(),
     updatedAt: DateTime.now(),
   ),
+  Service(
+    id: '',
+    code: 'EC16',
+    name: 'Repaint Service',
+    category: 'Paint',
+    description: 'Professional vehicle repainting service',
+    prices: {
+      'Standard': 4000.0,
+      'Premium': 7500.0,
+    },
+    isActive: true,
+    createdAt: DateTime.now(),
+    updatedAt: DateTime.now(),
+  ),
   // Promo Packages
   Service(
     id: '',

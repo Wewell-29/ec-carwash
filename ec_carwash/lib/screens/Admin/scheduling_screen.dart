@@ -38,20 +38,30 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
           .limit(5)
           .get();
 
-      debugPrint('🔍 DEBUG: Total bookings in Firestore: ${snapshot.docs.length}');
+      debugPrint(
+        '🔍 DEBUG: Total bookings in Firestore: ${snapshot.docs.length}',
+      );
       for (var doc in snapshot.docs) {
         final data = doc.data();
         debugPrint('  📄 Booking ${doc.id}:');
-        debugPrint('    - hasScheduledDateTime: ${data.containsKey('scheduledDateTime')}');
-        debugPrint('    - hasSelectedDateTime: ${data.containsKey('selectedDateTime')}');
+        debugPrint(
+          '    - hasScheduledDateTime: ${data.containsKey('scheduledDateTime')}',
+        );
+        debugPrint(
+          '    - hasSelectedDateTime: ${data.containsKey('selectedDateTime')}',
+        );
         debugPrint('    - status: ${data['status']}');
         debugPrint('    - source: ${data['source']}');
         debugPrint('    - userName: ${data['userName']}');
         if (data.containsKey('scheduledDateTime')) {
-          debugPrint('    - scheduledDateTime: ${(data['scheduledDateTime'] as Timestamp).toDate()}');
+          debugPrint(
+            '    - scheduledDateTime: ${(data['scheduledDateTime'] as Timestamp).toDate()}',
+          );
         }
         if (data.containsKey('selectedDateTime')) {
-          debugPrint('    - selectedDateTime: ${(data['selectedDateTime'] as Timestamp).toDate()}');
+          debugPrint(
+            '    - selectedDateTime: ${(data['selectedDateTime'] as Timestamp).toDate()}',
+          );
         }
       }
     } catch (e) {
@@ -88,7 +98,8 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
       for (final doc in snapshot.docs) {
         final data = doc.data();
-        final scheduledDateTime = (data['scheduledDateTime'] as Timestamp?)?.toDate();
+        final scheduledDateTime = (data['scheduledDateTime'] as Timestamp?)
+            ?.toDate();
         final paymentStatus = data['paymentStatus'] ?? 'pending';
 
         if (scheduledDateTime != null) {
@@ -103,7 +114,9 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
               'autoCancelled': true,
             });
 
-            debugPrint('Auto-cancelled booking ${doc.id} - ${timeDifference.inMinutes} minutes past scheduled time');
+            debugPrint(
+              'Auto-cancelled booking ${doc.id} - ${timeDifference.inMinutes} minutes past scheduled time',
+            );
           }
         }
       }
@@ -130,18 +143,30 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
       debugPrint('📊 Total bookings loaded: ${allBookings.length}');
       for (var booking in allBookings) {
-        debugPrint('  - ${booking.status}: ${booking.userName} (${booking.source}) - ${booking.scheduledDateTime}');
+        debugPrint(
+          '  - ${booking.status}: ${booking.userName} (${booking.source}) - ${booking.scheduledDateTime}',
+        );
       }
 
       // Separate bookings by status for Kanban columns
       setState(() {
-        _pendingBookings = allBookings.where((b) => b.status == 'pending').toList();
-        _approvedBookings = allBookings.where((b) => b.status == 'approved').toList();
-        _completedBookings = allBookings.where((b) => b.status == 'completed').toList();
-        _cancelledBookings = allBookings.where((b) => b.status == 'cancelled').toList();
+        _pendingBookings = allBookings
+            .where((b) => b.status == 'pending')
+            .toList();
+        _approvedBookings = allBookings
+            .where((b) => b.status == 'approved')
+            .toList();
+        _completedBookings = allBookings
+            .where((b) => b.status == 'completed')
+            .toList();
+        _cancelledBookings = allBookings
+            .where((b) => b.status == 'cancelled')
+            .toList();
         _isLoading = false;
 
-        debugPrint('✅ Pending: ${_pendingBookings.length}, Approved: ${_approvedBookings.length}, Completed: ${_completedBookings.length}, Cancelled: ${_cancelledBookings.length}');
+        debugPrint(
+          '✅ Pending: ${_pendingBookings.length}, Approved: ${_approvedBookings.length}, Completed: ${_completedBookings.length}, Cancelled: ${_cancelledBookings.length}',
+        );
       });
     } catch (e) {
       debugPrint('❌ Error loading bookings: $e');
@@ -153,9 +178,9 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         _isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading bookings: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading bookings: $e')));
       }
     }
   }
@@ -312,7 +337,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green.shade600,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 12,
+                    ),
                   ),
                   child: const Text("Approve & Assign"),
                 ),
@@ -324,14 +352,22 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     );
   }
 
-  Future<void> _updateBookingStatusWithTeam(String bookingId, String status, String team) async {
+  Future<void> _updateBookingStatusWithTeam(
+    String bookingId,
+    String status,
+    String team,
+  ) async {
     try {
       // Find the booking from all lists
       Booking? booking;
       booking = _pendingBookings.where((b) => b.id == bookingId).firstOrNull;
       booking ??= _approvedBookings.where((b) => b.id == bookingId).firstOrNull;
-      booking ??= _completedBookings.where((b) => b.id == bookingId).firstOrNull;
-      booking ??= _cancelledBookings.where((b) => b.id == bookingId).firstOrNull;
+      booking ??= _completedBookings
+          .where((b) => b.id == bookingId)
+          .firstOrNull;
+      booking ??= _cancelledBookings
+          .where((b) => b.id == bookingId)
+          .firstOrNull;
       if (booking == null) return;
 
       // Update booking status with team assignment
@@ -339,11 +375,11 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
           .collection('Bookings')
           .doc(bookingId)
           .update({
-        'status': status,
-        'assignedTeam': team,
-        'teamCommission': booking.totalAmount * 0.35, // 35% commission
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+            'status': status,
+            'assignedTeam': team,
+            'teamCommission': booking.totalAmount * 0.35, // 35% commission
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
 
       await _loadBookings(); // Refresh the list
       if (mounted) {
@@ -356,9 +392,9 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating booking: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error updating booking: $e')));
       }
     }
   }
@@ -369,8 +405,12 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       Booking? booking;
       booking = _pendingBookings.where((b) => b.id == bookingId).firstOrNull;
       booking ??= _approvedBookings.where((b) => b.id == bookingId).firstOrNull;
-      booking ??= _completedBookings.where((b) => b.id == bookingId).firstOrNull;
-      booking ??= _cancelledBookings.where((b) => b.id == bookingId).firstOrNull;
+      booking ??= _completedBookings
+          .where((b) => b.id == bookingId)
+          .firstOrNull;
+      booking ??= _cancelledBookings
+          .where((b) => b.id == bookingId)
+          .firstOrNull;
 
       if (booking == null) return;
 
@@ -380,7 +420,8 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       // If marking as completed, add commission
       if (status == 'completed') {
         // Calculate and add team commission (35%)
-        final commission = booking.assignedTeam != null && booking.assignedTeam!.isNotEmpty
+        final commission =
+            booking.assignedTeam != null && booking.assignedTeam!.isNotEmpty
             ? booking.totalAmount * 0.35
             : 0.0;
 
@@ -401,15 +442,87 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         if (status == 'completed') {
           message += ' and transaction record created';
         }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error updating booking: $e')));
+      }
+    }
+  }
+
+  Future<void> _markAsPaid(Booking booking) async {
+    try {
+      if (booking.id == null) return;
+
+      // Show payment confirmation dialog
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text(
+            'Confirm Payment',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Customer: ${booking.userName}'),
+              Text('Amount: ₱${booking.totalAmount.toStringAsFixed(2)}'),
+              const SizedBox(height: 16),
+              const Text('Has the customer paid for this booking?'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text(
+                'Yes, Paid',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+
+      // Update payment status to 'paid'
+      await FirebaseFirestore.instance
+          .collection('Bookings')
+          .doc(booking.id)
+          .update({
+            'paymentStatus': 'paid',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+      await _loadBookings();
+
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
+          const SnackBar(
+            content: Text('Booking marked as paid'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating booking: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error marking as paid: $e')));
       }
     }
   }
@@ -417,17 +530,20 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
   Future<void> _createTransactionFromBooking(Booking booking) async {
     try {
       // Use unified system - creates transaction with all relationships
-      final transactionId = await RelationshipManager.completeBookingWithTransaction(
-        booking: booking,
-        cash: booking.totalAmount,
-        change: 0.0,
-        teamCommission: 0.0,
-      );
+      final transactionId =
+          await RelationshipManager.completeBookingWithTransaction(
+            booking: booking,
+            cash: booking.totalAmount,
+            change: 0.0,
+            teamCommission: 0.0,
+          );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Transaction created: ${transactionId.substring(0, 8)}...'),
+            content: Text(
+              'Transaction created: ${transactionId.substring(0, 8)}...',
+            ),
             backgroundColor: Colors.green,
           ),
         );
@@ -464,9 +580,11 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                     setDialogState(() => selectedDate = date);
                   }
                 },
-                child: Text(selectedDate != null
-                    ? DateFormat('MMM dd, yyyy').format(selectedDate!)
-                    : 'Select Date'),
+                child: Text(
+                  selectedDate != null
+                      ? DateFormat('MMM dd, yyyy').format(selectedDate!)
+                      : 'Select Date',
+                ),
               ),
               const SizedBox(height: 8),
               ElevatedButton(
@@ -479,9 +597,11 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                     setDialogState(() => selectedTime = time);
                   }
                 },
-                child: Text(selectedTime != null
-                    ? selectedTime!.format(context)
-                    : 'Select Time'),
+                child: Text(
+                  selectedTime != null
+                      ? selectedTime!.format(context)
+                      : 'Select Time',
+                ),
               ),
             ],
           ),
@@ -501,10 +621,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                         selectedTime!.minute,
                       );
                       Navigator.pop(context);
-                      await _rescheduleBooking(
-                        booking.id!,
-                        newDateTime,
-                      );
+                      await _rescheduleBooking(booking.id!, newDateTime);
                     }
                   : null,
               child: const Text('Reschedule'),
@@ -515,7 +632,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     );
   }
 
-  Future<void> _rescheduleBooking(String bookingId, DateTime newDateTime) async {
+  Future<void> _rescheduleBooking(
+    String bookingId,
+    DateTime newDateTime,
+  ) async {
     try {
       await BookingManager.rescheduleBooking(bookingId, newDateTime);
       await _loadBookings(); // Refresh the list
@@ -533,115 +653,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     }
   }
 
-  Future<void> _showPaymentDialog(Booking booking) async {
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(Icons.payment, color: Colors.orange.shade600),
-              const SizedBox(width: 8),
-              const Text("Payment Required"),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                "Customer: ${booking.userName}",
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-              Text("Plate: ${booking.plateNumber}"),
-              Text("Total: ₱${booking.totalAmount.toStringAsFixed(2)}"),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.warning,
-                      color: Colors.red.shade600,
-                      size: 40,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      "This booking hasn't been paid yet",
-                      style: TextStyle(
-                        color: Colors.red.shade700,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      "Please confirm payment before approving and assigning a team.",
-                      style: TextStyle(
-                        color: Colors.red.shade600,
-                        fontSize: 14,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                await _markAsPaidAndProceed(booking);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green.shade600,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              ),
-              child: const Text("Mark as Paid"),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _markAsPaidAndProceed(Booking booking) async {
-    try {
-      // Update payment status to paid
-      await FirebaseFirestore.instance
-          .collection('Bookings')
-          .doc(booking.id!)
-          .update({
-        'paymentStatus': 'paid',
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      await _loadBookings(); // Refresh the list
-
-      // Show team selection dialog
-      if (mounted) {
-        await _showTeamSelectionForApproval(booking.copyWith(paymentStatus: 'paid'));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating payment status: $e')),
-        );
-      }
-    }
-  }
 
   Future<void> _fixExistingPOSBookingsPaymentStatus() async {
     try {
@@ -673,7 +684,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       debugPrint('Error fixing POS booking payment status: $e');
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -751,8 +761,12 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     );
   }
 
-
-  Widget _buildKanbanColumn(String title, List<Booking> bookings, Color color, IconData icon) {
+  Widget _buildKanbanColumn(
+    String title,
+    List<Booking> bookings,
+    Color color,
+    IconData icon,
+  ) {
     return Container(
       margin: const EdgeInsets.all(8),
       decoration: BoxDecoration(
@@ -774,7 +788,9 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: color,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(12),
+              ),
             ),
             child: Row(
               children: [
@@ -790,7 +806,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                 ),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(12),
@@ -823,7 +842,8 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                     padding: const EdgeInsets.all(8),
                     itemCount: bookings.length,
                     itemBuilder: (context, index) {
-                      if (index >= bookings.length) return const SizedBox.shrink();
+                      if (index >= bookings.length)
+                        return const SizedBox.shrink();
                       final booking = bookings[index];
                       return _buildKanbanCard(booking);
                     },
@@ -860,11 +880,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
           children: [
             // Header - Customer name
             Text(
-              booking.userName.isNotEmpty ? booking.userName : 'Unknown Customer',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
+              booking.userName.isNotEmpty
+                  ? booking.userName
+                  : 'Unknown Customer',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -880,14 +899,12 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
-                    Icons.schedule,
-                    size: 14,
-                    color: Colors.blue,
-                  ),
+                  const Icon(Icons.schedule, size: 14, color: Colors.blue),
                   const SizedBox(width: 4),
                   Text(
-                    DateFormat('MMM dd, yyyy').format(booking.scheduledDateTime),
+                    DateFormat(
+                      'MMM dd, yyyy',
+                    ).format(booking.scheduledDateTime),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
@@ -896,11 +913,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    TimeOfDay.fromDateTime(booking.scheduledDateTime).format(context),
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Colors.blue,
-                    ),
+                    TimeOfDay.fromDateTime(
+                      booking.scheduledDateTime,
+                    ).format(context),
+                    style: const TextStyle(fontSize: 11, color: Colors.blue),
                   ),
                 ],
               ),
@@ -919,10 +935,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
             // Services (compact)
             Text(
               '${booking.services.length} service(s)',
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: 11,
-              ),
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
             ),
             const SizedBox(height: 4),
             // Source and Team Assignment Indicators
@@ -931,7 +944,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                 // Source indicator (POS vs App)
                 if (booking.source == 'pos')
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.blue.shade100,
                       borderRadius: BorderRadius.circular(6),
@@ -948,7 +964,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                   )
                 else
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.purple.shade100,
                       borderRadius: BorderRadius.circular(6),
@@ -967,7 +986,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                 // Team assignment indicator
                 if (booking.assignedTeam != null)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: booking.assignedTeam == 'Team A'
                           ? Colors.indigo.shade100
@@ -1007,7 +1029,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                 // Auto-cancelled indicator
                 if (booking.status == 'cancelled' && booking.autoCancelled)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.orange.shade100,
                       borderRadius: BorderRadius.circular(6),
@@ -1049,7 +1074,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: booking.paymentStatus == 'paid'
                         ? Colors.green.shade100
@@ -1085,80 +1113,32 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
   Widget _buildKanbanCardActions(Booking booking) {
     if (booking.status == 'pending') {
-      // POS bookings - already paid and don't need team assignment
-      if (booking.source == 'pos') {
-        return Column(
-          children: [
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'approved') : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  textStyle: const TextStyle(fontSize: 12),
-                ),
-                child: const Text('Approve'),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'cancelled') : null,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red,
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      textStyle: const TextStyle(fontSize: 12),
-                    ),
-                    child: const Text('Reject'),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: TextButton(
-                    onPressed: booking.id != null ? () => _showRescheduleDialog(booking) : null,
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.orange,
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      textStyle: const TextStyle(fontSize: 11),
-                    ),
-                    child: const Text('Reschedule'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        );
-      }
-
-      // App bookings - need payment check and team assignment
+      // All pending bookings - approve with team assignment (payment not required)
       return Column(
         children: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: booking.id != null
+                  ? () => _showTeamSelectionForApproval(booking)
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                textStyle: const TextStyle(fontSize: 12),
+              ),
+              child: const Text('Approve & Assign'),
+            ),
+          ),
+          const SizedBox(height: 4),
           Row(
             children: [
               Expanded(
-                child: ElevatedButton(
-                  onPressed: booking.id != null
-                      ? () => booking.paymentStatus == 'paid'
-                          ? _showTeamSelectionForApproval(booking)
-                          : _showPaymentDialog(booking)
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: booking.paymentStatus == 'paid' ? Colors.green : Colors.orange,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    textStyle: const TextStyle(fontSize: 12),
-                  ),
-                  child: Text(booking.paymentStatus == 'paid' ? 'Approve' : 'Pay & Approve'),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
                 child: OutlinedButton(
-                  onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'cancelled') : null,
+                  onPressed: booking.id != null
+                      ? () => _updateBookingStatus(booking.id!, 'cancelled')
+                      : null,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.red,
                     padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1167,44 +1147,79 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                   child: const Text('Reject'),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: booking.id != null ? () => _showRescheduleDialog(booking) : null,
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.orange,
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                textStyle: const TextStyle(fontSize: 11),
+              const SizedBox(width: 4),
+              Expanded(
+                child: TextButton(
+                  onPressed: booking.id != null
+                      ? () => _showRescheduleDialog(booking)
+                      : null,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.orange,
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    textStyle: const TextStyle(fontSize: 11),
+                  ),
+                  child: const Text('Reschedule'),
+                ),
               ),
-              child: const Text('Reschedule'),
-            ),
+            ],
           ),
         ],
       );
     } else if (booking.status == 'approved') {
+      // Check if this is a mobile app booking (needs payment) or POS booking (already paid)
+      final bool isPOSBooking = booking.source == 'pos';
+      final bool isPaid = booking.paymentStatus == 'paid';
+
       return Column(
         children: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: booking.id != null ? () => _updateBookingStatus(booking.id!, 'completed') : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                textStyle: const TextStyle(fontSize: 12),
+          if (!isPaid && !isPOSBooking) ...[
+            // Mobile app booking - needs payment first
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: booking.id != null
+                    ? () => _markAsPaid(booking)
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  textStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                icon: const Icon(Icons.payment, size: 16),
+                label: const Text('Mark as Paid'),
               ),
-              child: const Text('Mark Complete'),
             ),
-          ),
-          const SizedBox(height: 4),
+            const SizedBox(height: 4),
+          ],
+          if (isPaid || isPOSBooking) ...[
+            // Can mark complete once paid
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: booking.id != null
+                    ? () => _updateBookingStatus(booking.id!, 'completed')
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+                child: const Text('Mark Complete'),
+              ),
+            ),
+            const SizedBox(height: 4),
+          ],
           SizedBox(
             width: double.infinity,
             child: TextButton(
-              onPressed: booking.id != null ? () => _showRescheduleDialog(booking) : null,
+              onPressed: booking.id != null
+                  ? () => _showRescheduleDialog(booking)
+                  : null,
               style: TextButton.styleFrom(
                 foregroundColor: Colors.orange,
                 padding: const EdgeInsets.symmetric(vertical: 2),

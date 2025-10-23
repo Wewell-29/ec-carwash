@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:ec_carwash/data_models/expense_data.dart';
+import 'package:ec_carwash/data_models/inventory_data.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -424,7 +425,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
-  void _showAddExpenseDialog() {
+  void _showAddExpenseDialog() async {
     DateTime selectedDate = DateTime.now();
     String selectedCategory = 'Utilities';
     final descriptionController = TextEditingController();
@@ -432,6 +433,21 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     final quantityController = TextEditingController();
     final vendorController = TextEditingController();
     final notesController = TextEditingController();
+
+    // Load inventory items for Supplies dropdown
+    List<String> inventoryItems = [];
+    String? selectedInventoryItem;
+    bool showCustomDescription = false;
+
+    try {
+      final inventory = await InventoryManager.getItems();
+      inventoryItems = inventory.map((item) => item.name).toList();
+      inventoryItems.add('Others'); // Add Others option
+    } catch (e) {
+      debugPrint('Error loading inventory: $e');
+    }
+
+    if (!mounted) return;
 
     showDialog(
       context: context,
@@ -491,15 +507,52 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Description
-                    TextField(
-                      controller: descriptionController,
-                      decoration: const InputDecoration(
-                        labelText: 'Description *',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.description),
+                    // Description - Dropdown for Supplies, TextField otherwise
+                    if (selectedCategory == 'Supplies') ...[
+                      DropdownButtonFormField<String>(
+                        value: selectedInventoryItem,
+                        decoration: const InputDecoration(
+                          labelText: 'Select Item *',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.inventory),
+                        ),
+                        items: inventoryItems.map((item) => DropdownMenuItem(
+                          value: item,
+                          child: Text(item),
+                        )).toList(),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selectedInventoryItem = value;
+                            showCustomDescription = value == 'Others';
+                            if (value != 'Others' && value != null) {
+                              descriptionController.text = value;
+                            } else {
+                              descriptionController.clear();
+                            }
+                          });
+                        },
                       ),
-                    ),
+                      if (showCustomDescription) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: descriptionController,
+                          decoration: const InputDecoration(
+                            labelText: 'Custom Description *',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.description),
+                          ),
+                        ),
+                      ],
+                    ] else ...[
+                      TextField(
+                        controller: descriptionController,
+                        decoration: const InputDecoration(
+                          labelText: 'Description *',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.description),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
 
                     // Amount and Quantity Row
