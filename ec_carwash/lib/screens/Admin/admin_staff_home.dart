@@ -114,10 +114,10 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
 
       double todayExp = expensesSnapshot.fold(0.0, (sum, expense) => sum + expense.amount);
 
-      // Load today's approved bookings from scheduling (not completed)
+      // Load today's pending bookings awaiting approval
       final bookingsSnapshot = await FirebaseFirestore.instance
           .collection('Bookings')
-          .where('status', isEqualTo: 'approved')
+          .where('status', isEqualTo: 'pending')
           .get();
 
       List<Map<String, dynamic>> pendingBookings = [];
@@ -145,6 +145,16 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
           });
         }
       }
+
+      // Sort by scheduledDate chronologically (oldest first)
+      pendingBookings.sort((a, b) {
+        final dateA = a['scheduledDate'] as DateTime?;
+        final dateB = b['scheduledDate'] as DateTime?;
+        if (dateA == null && dateB == null) return 0;
+        if (dateA == null) return 1;
+        if (dateB == null) return -1;
+        return dateA.compareTo(dateB);
+      });
 
       if (mounted) {
         setState(() {
@@ -1322,58 +1332,60 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                     ),
                   ),
                 )
-              : ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _pendingBookingsList.length,
-                  separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.black87),
-                  itemBuilder: (context, index) {
-                    final booking = _pendingBookingsList[index];
-                    final scheduledDate = booking['scheduledDate'] as DateTime?;
-                    final plateNumber = booking['plateNumber'] as String;
-                    final services = booking['services'] as String;
+              : SizedBox(
+                  height: 300,
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: _pendingBookingsList.length > 5 ? 5 : _pendingBookingsList.length,
+                    separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.black87),
+                    itemBuilder: (context, index) {
+                      final booking = _pendingBookingsList[index];
+                      final scheduledDate = booking['scheduledDate'] as DateTime?;
+                      final plateNumber = booking['plateNumber'] as String;
+                      final services = booking['services'] as String;
 
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      leading: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.yellow.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.black87, width: 1),
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.yellow.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.black87, width: 1),
+                          ),
+                          child: const Icon(Icons.directions_car, color: Colors.black87, size: 20),
                         ),
-                        child: const Icon(Icons.directions_car, color: Colors.black87, size: 20),
-                      ),
-                      title: Text(
-                        plateNumber,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: Colors.black87,
+                        title: Text(
+                          plateNumber,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Colors.black87,
+                          ),
                         ),
-                      ),
-                      subtitle: Text(
-                        services,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.black.withValues(alpha: 0.7),
+                        subtitle: Text(
+                          services,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black.withValues(alpha: 0.7),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: scheduledDate != null
-                          ? Text(
-                              DateFormat('hh:mm a').format(scheduledDate),
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87,
-                              ),
-                            )
-                          : null,
-                    );
-                  },
+                        trailing: scheduledDate != null
+                            ? Text(
+                                DateFormat('hh:mm a').format(scheduledDate),
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
+                                ),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
                 ),
         ],
       ),
@@ -1440,71 +1452,73 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                     ),
                   ),
                 )
-              : ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _lowStockItems.length > 5 ? 5 : _lowStockItems.length,
-                  separatorBuilder: (context, index) => Divider(
-                    height: 1,
-                    color: Colors.black.withValues(alpha: 0.1),
-                  ),
-                  itemBuilder: (context, index) {
-                    final item = _lowStockItems[index];
-                    final isCritical = item.currentStock <= item.minStock / 2;
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      leading: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: isCritical ? Colors.red.shade100 : Colors.yellow.shade700,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
+              : SizedBox(
+                  height: 300,
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: _lowStockItems.length,
+                    separatorBuilder: (context, index) => Divider(
+                      height: 1,
+                      color: Colors.black.withValues(alpha: 0.1),
+                    ),
+                    itemBuilder: (context, index) {
+                      final item = _lowStockItems[index];
+                      final isCritical = item.currentStock <= item.minStock / 2;
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: isCritical ? Colors.red.shade100 : Colors.yellow.shade700,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isCritical ? Colors.red.shade700 : Colors.black87,
+                              width: 1,
+                            ),
+                          ),
+                          child: Icon(
+                            isCritical ? Icons.error : Icons.inventory_2,
                             color: isCritical ? Colors.red.shade700 : Colors.black87,
-                            width: 1,
+                            size: 20,
                           ),
                         ),
-                        child: Icon(
-                          isCritical ? Icons.error : Icons.inventory_2,
-                          color: isCritical ? Colors.red.shade700 : Colors.black87,
-                          size: 20,
-                        ),
-                      ),
-                      title: Text(
-                        item.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'Min: ${item.minStock} ${item.unit}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.black.withValues(alpha: 0.6),
-                        ),
-                      ),
-                      trailing: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: isCritical ? Colors.red.shade100 : Colors.yellow.shade100,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: isCritical ? Colors.red.shade700 : Colors.black87,
-                            width: 1,
+                        title: Text(
+                          item.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            color: Colors.black87,
                           ),
                         ),
-                        child: Text(
-                          '${item.currentStock} ${item.unit}',
+                        subtitle: Text(
+                          'Min: ${item.minStock} ${item.unit}',
                           style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: isCritical ? Colors.red.shade700 : Colors.black87,
+                            fontSize: 13,
+                            color: Colors.black.withValues(alpha: 0.6),
                           ),
                         ),
-                      ),
-                    );
-                  },
+                        trailing: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isCritical ? Colors.red.shade100 : Colors.yellow.shade100,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isCritical ? Colors.red.shade700 : Colors.black87,
+                              width: 1,
+                            ),
+                          ),
+                          child: Text(
+                            '${item.currentStock} ${item.unit}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: isCritical ? Colors.red.shade700 : Colors.black87,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
         ],
       ),

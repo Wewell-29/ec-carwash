@@ -412,7 +412,7 @@ List<Service> initialServices = [
     code: 'EC16',
     name: 'Repaint Service',
     category: 'Paint',
-    description: 'Professional vehicle repainting service',
+    description: 'Professional vehicle repainting service - price per panel',
     prices: {
       'Standard': 4000.0,
       'Premium': 7500.0,

@@ -932,10 +932,28 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            // Services (compact)
-            Text(
-              '${booking.services.length} service(s)',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+            // Services with codes
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: booking.services.map((service) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.yellow.shade100,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.yellow.shade700),
+                  ),
+                  child: Text(
+                    service.serviceCode,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.yellow.shade900,
+                    ),
+                  ),
+                );
+              }).toList(),
             ),
             const SizedBox(height: 4),
             // Source and Team Assignment Indicators

@@ -999,7 +999,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                         _buildPdfTableCell(DateFormat('MM/dd/yy').format(t.transactionAt)),
                         _buildPdfTableCell(t.customerName.isNotEmpty ? t.customerName : 'N/A'),
                         _buildPdfTableCell(t.vehiclePlateNumber.isNotEmpty ? t.vehiclePlateNumber : 'N/A'),
-                        _buildPdfTableCell('${t.services.length} service(s)'),
+                        _buildPdfTableCell(t.services.map((s) => s.serviceCode).join(', ')),
                         _buildPdfTableCell('P${t.total.toStringAsFixed(2)}'),
                       ],
                     ),

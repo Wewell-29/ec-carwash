@@ -159,9 +159,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         // Top services analysis
         if (services != null) {
           for (final service in services) {
-            final serviceName = service['serviceName'] ?? 'Unknown';
+            final serviceCode = service['serviceCode'] ?? 'Unknown';
             final price = (service['price'] as num?)?.toDouble() ?? 0.0;
-            serviceRev[serviceName] = (serviceRev[serviceName] ?? 0.0) + price;
+            serviceRev[serviceCode] = (serviceRev[serviceCode] ?? 0.0) + price;
           }
         }
       }
@@ -220,11 +220,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         // Top services analysis
         if (services != null) {
           for (final service in services) {
-            final serviceName = service['serviceName'] ??
-                               service['serviceCode'] ?? 'Unknown';
+            final serviceCode = service['serviceCode'] ?? 'Unknown';
             final price = (service['price'] as num?)?.toDouble() ?? 0.0;
             final quantity = (service['quantity'] as num?)?.toInt() ?? 1;
-            serviceRev[serviceName] = (serviceRev[serviceName] ?? 0.0) + (price * quantity);
+            serviceRev[serviceCode] = (serviceRev[serviceCode] ?? 0.0) + (price * quantity);
           }
         }
       }

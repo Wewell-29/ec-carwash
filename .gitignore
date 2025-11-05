@@ -1,0 +1,8 @@
+# Documentation files (kept locally only)
+*.md
+!ec_carwash/README.md
+!ec_carwash/ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md
+!functions/README.md
+
+# CSV files
+*.csv

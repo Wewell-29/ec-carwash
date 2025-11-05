@@ -53,6 +53,7 @@ class _POSScreenState extends State<POSScreen> {
   bool _hasSearched = false;
   List<Customer> _searchResults = <Customer>[];
   List<Customer> get searchResults => _searchResults;
+  String _searchType = 'plate'; // 'plate' or 'name'
 
   // Services data
   List<Service> _services = [];
@@ -233,6 +234,8 @@ class _POSScreenState extends State<POSScreen> {
 
 
   void _performSearch(String query) async {
+    if (query.isEmpty) return;
+
     setState(() {
       isSearching = true;
       _hasSearched = false;
@@ -240,48 +243,31 @@ class _POSScreenState extends State<POSScreen> {
     });
 
     try {
-      // Try plate search first (more specific)
-      if (query.length >= 3) {
-        final customer = await CustomerManager.getCustomerByPlateNumber(query);
-        if (customer != null) {
-          setState(() {
-            _searchResults = [customer];
-            isSearching = false;
-            _hasSearched = true;
-          });
-          return;
-        }
+      List<Customer> results = [];
+
+      if (_searchType == 'plate') {
+        // License plate search - case-insensitive partial matching
+        final normalizedQuery = query.trim().toUpperCase();
+
+        // Get all customers and filter by partial plate match
+        final allCustomers = await CustomerManager.getAllCustomers();
+        results = allCustomers.where((customer) {
+          return customer.plateNumber.toUpperCase().contains(normalizedQuery);
+        }).toList();
+
+      } else {
+        // Name search - case-insensitive partial matching
+        final normalizedQuery = query.trim().toLowerCase();
+
+        // Get all customers and filter by partial name match
+        final allCustomers = await CustomerManager.getAllCustomers();
+        results = allCustomers.where((customer) {
+          return customer.name.toLowerCase().contains(normalizedQuery);
+        }).toList();
       }
 
-      // If no plate results, try name search
-      if (query.length >= 2) {
-        // Try different case variations
-        final variations = [
-          query.trim(),
-          query.toLowerCase(),
-          query.trim().toLowerCase().replaceFirst(query.trim().toLowerCase()[0], query.trim().toLowerCase()[0].toUpperCase()),
-        ];
-
-        for (final variation in variations) {
-          try {
-            final customers = await CustomerManager.searchCustomersByName(variation);
-            if (customers.isNotEmpty) {
-              setState(() {
-                _searchResults = customers;
-                isSearching = false;
-                _hasSearched = true;
-              });
-              return;
-            }
-          } catch (e) {
-            debugPrint('Search variation failed for "$variation": $e');
-          }
-        }
-      }
-
-      // No results found
       setState(() {
-        _searchResults.clear();
+        _searchResults = results;
         isSearching = false;
         _hasSearched = true;
       });
@@ -412,6 +398,12 @@ class _POSScreenState extends State<POSScreen> {
     final product = servicesData[code];
     if (product == null) return;
 
+    // Special handling for Repaint Service (EC16) - show panel selection
+    if (code == 'EC16') {
+      _showRepaintPanelDialog();
+      return;
+    }
+
     final prices = (product["prices"] as Map<String, dynamic>);
     final vt = _vehicleTypeForCustomer;
 
@@ -482,6 +474,390 @@ class _POSScreenState extends State<POSScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // Special dialog for Repaint Service - select quality and number of panels
+  void _showRepaintPanelDialog() {
+    final product = servicesData['EC16'];
+    if (product == null) return;
+
+    final prices = product["prices"] as Map<String, dynamic>;
+    final standardPrice = (prices['Standard'] as num?)?.toDouble() ?? 4000.0;
+    final premiumPrice = (prices['Premium'] as num?)?.toDouble() ?? 7500.0;
+
+    String selectedQuality = 'Standard';
+    int selectedPanels = 1;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final pricePerPanel = selectedQuality == 'Standard' ? standardPrice : premiumPrice;
+          final totalPrice = pricePerPanel * selectedPanels;
+
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.black87, width: 2),
+            ),
+            title: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.yellow.shade700, Colors.yellow.shade800],
+                ),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.black87, width: 1),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.format_paint, color: Colors.black87, size: 24),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Repaint Service',
+                    style: TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Quality Selection
+                const Text(
+                  'Select Quality:',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => setDialogState(() => selectedQuality = 'Standard'),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            gradient: selectedQuality == 'Standard'
+                                ? LinearGradient(
+                                    colors: [Colors.yellow.shade700, Colors.yellow.shade600],
+                                  )
+                                : null,
+                            color: selectedQuality == 'Standard' ? null : Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: selectedQuality == 'Standard'
+                                  ? Colors.black87
+                                  : Colors.grey.shade400,
+                              width: selectedQuality == 'Standard' ? 2 : 1,
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.check_circle,
+                                color: selectedQuality == 'Standard'
+                                    ? Colors.black87
+                                    : Colors.grey.shade600,
+                                size: 28,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Standard',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: selectedQuality == 'Standard'
+                                      ? Colors.black87
+                                      : Colors.grey.shade700,
+                                ),
+                              ),
+                              Text(
+                                '₱${standardPrice.toStringAsFixed(0)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: selectedQuality == 'Standard'
+                                      ? Colors.black87
+                                      : Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => setDialogState(() => selectedQuality = 'Premium'),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            gradient: selectedQuality == 'Premium'
+                                ? LinearGradient(
+                                    colors: [Colors.yellow.shade700, Colors.yellow.shade600],
+                                  )
+                                : null,
+                            color: selectedQuality == 'Premium' ? null : Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: selectedQuality == 'Premium'
+                                  ? Colors.black87
+                                  : Colors.grey.shade400,
+                              width: selectedQuality == 'Premium' ? 2 : 1,
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.stars,
+                                color: selectedQuality == 'Premium'
+                                    ? Colors.black87
+                                    : Colors.grey.shade600,
+                                size: 28,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Premium',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: selectedQuality == 'Premium'
+                                      ? Colors.black87
+                                      : Colors.grey.shade700,
+                                ),
+                              ),
+                              Text(
+                                '₱${premiumPrice.toStringAsFixed(0)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: selectedQuality == 'Premium'
+                                      ? Colors.black87
+                                      : Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                // Panel Selection
+                const Text(
+                  'Number of Panels:',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: selectedPanels > 1
+                            ? () => setDialogState(() => selectedPanels--)
+                            : null,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: selectedPanels > 1 ? Colors.red.shade100 : Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: selectedPanels > 1 ? Colors.black87 : Colors.grey.shade400,
+                              width: 1,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.remove,
+                            color: selectedPanels > 1 ? Colors.black87 : Colors.grey.shade500,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Colors.yellow.shade50, Colors.white],
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.black87, width: 2),
+                      ),
+                      child: Text(
+                        '$selectedPanels',
+                        style: const TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => setDialogState(() => selectedPanels++),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.black87, width: 1),
+                          ),
+                          child: const Icon(
+                            Icons.add,
+                            color: Colors.black87,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                // Price Summary
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.yellow.shade50, Colors.white],
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.black87, width: 1.5),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Price per panel:',
+                            style: TextStyle(fontSize: 14, color: Colors.black87),
+                          ),
+                          Text(
+                            '₱${pricePerPanel.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Divider(color: Colors.black87, height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Total:',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          Text(
+                            '₱${totalPrice.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.yellow.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.black87),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+
+                  // Check if repaint already exists in cart
+                  final existingIndex = cart.indexWhere((item) => item["code"] == 'EC16');
+                  if (existingIndex >= 0) {
+                    // Update quantity and price
+                    setState(() {
+                      cart[existingIndex]["quantity"] = selectedPanels;
+                      cart[existingIndex]["price"] = pricePerPanel;
+                      cart[existingIndex]["category"] = selectedQuality;
+                    });
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Updated: $selectedQuality - $selectedPanels panel(s)'),
+                          backgroundColor: Colors.yellow.shade700,
+                        ),
+                      );
+                    }
+                  } else {
+                    // Add new repaint service
+                    setState(() {
+                      cart.add({
+                        "code": 'EC16',
+                        "name": product["name"],
+                        "category": selectedQuality,
+                        "price": pricePerPanel,
+                        "quantity": selectedPanels,
+                      });
+                    });
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Added: $selectedQuality Repaint - $selectedPanels panel(s)'),
+                          backgroundColor: Colors.yellow.shade700,
+                        ),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.yellow.shade700,
+                  foregroundColor: Colors.black87,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Add to Cart',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -672,11 +1048,11 @@ class _POSScreenState extends State<POSScreen> {
                                             product["name"],
                                             textAlign: TextAlign.center,
                                             style: TextStyle(
-                                              fontSize: responsive.fontSize(mobile: 10, tablet: 10, desktop: 11),
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.grey.shade800,
-                                              height: 1.1,
-                                              letterSpacing: 0.1,
+                                              fontSize: responsive.fontSize(mobile: 12, tablet: 13, desktop: 14),
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black87,
+                                              height: 1.2,
+                                              letterSpacing: 0.2,
                                             ),
                                             maxLines: 3,
                                             overflow: TextOverflow.ellipsis,
@@ -790,7 +1166,7 @@ class _POSScreenState extends State<POSScreen> {
               if (currentCustomer != null || _currentCustomerId != null) ...[
                 // Selected Customer Display
                 Container(
-                  padding: EdgeInsets.all(isTablet ? 12 : 16),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
@@ -818,14 +1194,15 @@ class _POSScreenState extends State<POSScreen> {
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.check_circle, color: Colors.green.shade600),
-                          const SizedBox(width: 8),
+                          Icon(Icons.check_circle, color: Colors.green.shade600, size: 18),
+                          const SizedBox(width: 6),
                           const Text(
                             "Customer Selected",
-                            style: TextStyle(fontWeight: FontWeight.w600, color: Colors.green),
+                            style: TextStyle(fontWeight: FontWeight.w600, color: Colors.green, fontSize: 13),
                           ),
                           const Spacer(),
                           TextButton.icon(
@@ -835,93 +1212,102 @@ class _POSScreenState extends State<POSScreen> {
                                 _showNewCustomerForm = false;
                               });
                             },
-                            icon: const Icon(Icons.edit),
-                            label: const Text("Change Customer"),
+                            icon: const Icon(Icons.edit, size: 16),
+                            label: const Text("Change", style: TextStyle(fontSize: 12)),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              minimumSize: const Size(0, 0),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Row(
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  nameController.text,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18,
+                          Text(
+                            nameController.text,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(Icons.directions_car, size: 14, color: Colors.grey.shade600),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  plateController.text,
+                                  style: TextStyle(
+                                    color: Colors.grey.shade700,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 13,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    Icon(Icons.directions_car, size: 16, color: Colors.grey.shade600),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      plateController.text,
-                                      style: TextStyle(
-                                        color: Colors.grey.shade700,
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 15,
-                                      ),
+                              ),
+                              if (_vehicleTypeForCustomer != null && _vehicleTypeForCustomer!.isNotEmpty) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.yellow.shade100,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    _vehicleTypeForCustomer!,
+                                    style: const TextStyle(
+                                      color: Colors.black87,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
                                     ),
-                                    if (_vehicleTypeForCustomer != null && _vehicleTypeForCustomer!.isNotEmpty) ...[
-                                      const SizedBox(width: 8),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.yellow.shade100,
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: Text(
-                                          _vehicleTypeForCustomer!,
-                                          style: TextStyle(
-                                            color: Colors.black87,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ],
+                                  ),
                                 ),
-                                if (emailController.text.isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Row(
-                                    children: [
-                                      Icon(Icons.email, size: 16, color: Colors.grey.shade600),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        emailController.text,
-                                        style: TextStyle(
-                                          color: Colors.grey.shade700,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ],
+                              ],
+                            ],
+                          ),
+                          if (emailController.text.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Row(
+                              children: [
+                                Icon(Icons.email, size: 14, color: Colors.grey.shade600),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    emailController.text,
+                                    style: TextStyle(
+                                      color: Colors.grey.shade700,
+                                      fontSize: 12,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                ],
-                                if (phoneController.text.isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Row(
-                                    children: [
-                                      Icon(Icons.phone, size: 16, color: Colors.grey.shade600),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        phoneController.text,
-                                        style: TextStyle(
-                                          color: Colors.grey.shade700,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
+                                ),
                               ],
                             ),
-                          ),
+                          ],
+                          if (phoneController.text.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Row(
+                              children: [
+                                Icon(Icons.phone, size: 14, color: Colors.grey.shade600),
+                                const SizedBox(width: 4),
+                                Text(
+                                  phoneController.text,
+                                  style: TextStyle(
+                                    color: Colors.grey.shade700,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ],
@@ -929,15 +1315,139 @@ class _POSScreenState extends State<POSScreen> {
                 ),
               ] else ...[
                 // Quick Search Mode
+                // Search Type Chooser
+                Row(
+                  children: [
+                    const Text(
+                      'Search by:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _searchType = 'plate';
+                                  plateController.clear();
+                                  _searchResults.clear();
+                                  _hasSearched = false;
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                                decoration: BoxDecoration(
+                                  gradient: _searchType == 'plate'
+                                      ? LinearGradient(
+                                          colors: [Colors.yellow.shade700, Colors.yellow.shade600],
+                                        )
+                                      : null,
+                                  color: _searchType == 'plate' ? null : Colors.grey.shade200,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _searchType == 'plate' ? Colors.black87 : Colors.grey.shade400,
+                                    width: _searchType == 'plate' ? 2 : 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.pin,
+                                      size: 18,
+                                      color: _searchType == 'plate' ? Colors.black87 : Colors.grey.shade600,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'License Plate',
+                                      style: TextStyle(
+                                        fontWeight: _searchType == 'plate' ? FontWeight.bold : FontWeight.w500,
+                                        fontSize: 13,
+                                        color: _searchType == 'plate' ? Colors.black87 : Colors.grey.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _searchType = 'name';
+                                  plateController.clear();
+                                  _searchResults.clear();
+                                  _hasSearched = false;
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                                decoration: BoxDecoration(
+                                  gradient: _searchType == 'name'
+                                      ? LinearGradient(
+                                          colors: [Colors.yellow.shade700, Colors.yellow.shade600],
+                                        )
+                                      : null,
+                                  color: _searchType == 'name' ? null : Colors.grey.shade200,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _searchType == 'name' ? Colors.black87 : Colors.grey.shade400,
+                                    width: _searchType == 'name' ? 2 : 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.person,
+                                      size: 18,
+                                      color: _searchType == 'name' ? Colors.black87 : Colors.grey.shade600,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Customer Name',
+                                      style: TextStyle(
+                                        fontWeight: _searchType == 'name' ? FontWeight.bold : FontWeight.w500,
+                                        fontSize: 13,
+                                        color: _searchType == 'name' ? Colors.black87 : Colors.grey.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Search Field
                 Row(
                   children: [
                     Expanded(
                       child: TextField(
                         controller: plateController,
                         decoration: InputDecoration(
-                          labelText: "Search by Plate or Name",
-                          hintText: "e.g. ABC1234 or John Doe (Press Enter to search)",
-                          prefixIcon: Icon(Icons.search, color: Colors.black87),
+                          labelText: _searchType == 'plate' ? "Search by License Plate" : "Search by Customer Name",
+                          hintText: _searchType == 'plate'
+                              ? "e.g. ABC, 1234, ABC1234 (Press Enter)"
+                              : "e.g. John, Doe, John Doe (Press Enter)",
+                          prefixIcon: Icon(
+                            _searchType == 'plate' ? Icons.pin : Icons.person_search,
+                            color: Colors.black87,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -977,7 +1487,9 @@ class _POSScreenState extends State<POSScreen> {
                             _performSearch(query);
                           }
                         },
-                        textCapitalization: TextCapitalization.characters,
+                        textCapitalization: _searchType == 'plate'
+                            ? TextCapitalization.characters
+                            : TextCapitalization.words,
                         textInputAction: TextInputAction.search,
                       ),
                     ),
@@ -1806,115 +2318,145 @@ class _POSScreenState extends State<POSScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 24),
-                    // Content
+                    const SizedBox(height: 16),
+                    // Scrollable Order Details Section
                     Expanded(
                       child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Customer Information Section
-                    if (nameController.text.trim().isNotEmpty || plateController.text.trim().isNotEmpty) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.blue.shade50, Colors.blue.shade100],
-                          ),
-                          border: Border.all(color: Colors.blue.shade300, width: 1.5),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                Icon(Icons.person, color: Theme.of(context).colorScheme.primary, size: 20),
-                                const SizedBox(width: 8),
-                                Text(
-                                  "Customer Information",
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                    color: Theme.of(context).colorScheme.secondary,
+                            // Customer Information Section
+                            if (nameController.text.trim().isNotEmpty || plateController.text.trim().isNotEmpty) ...[
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [Colors.yellow.shade50, Colors.yellow.shade100],
                                   ),
+                                  border: Border.all(color: Colors.black87, width: 1.5),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                              ],
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(Icons.person, color: Colors.black87, size: 20),
+                                        const SizedBox(width: 8),
+                                        const Text(
+                                          "Customer Information",
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    if (nameController.text.trim().isNotEmpty)
+                                      Text(
+                                        "Name: ${nameController.text.trim()}",
+                                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87),
+                                      ),
+                                    if (plateController.text.trim().isNotEmpty)
+                                      Text(
+                                        "Plate: ${plateController.text.trim().toUpperCase()}",
+                                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                            // Services Section
+                            Text(
+                              "Services:",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.grey.shade700,
+                              ),
                             ),
                             const SizedBox(height: 8),
-                            if (nameController.text.trim().isNotEmpty)
-                              Text(
-                                "Name: ${nameController.text.trim()}",
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                              ),
-                            if (plateController.text.trim().isNotEmpty)
-                              Text(
-                                "Plate: ${plateController.text.trim().toUpperCase()}",
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                              ),
+                            ...cart.map((item) {
+                              final price = (item["price"] as num).toDouble();
+                              final qty = (item["quantity"] ?? 0) as int;
+                              final subtotal = price * qty;
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade50,
+                                  border: Border.all(color: Colors.grey.shade200),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      "${item["code"]} - ${item["category"]}",
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      "₱${price.toStringAsFixed(2)} x $qty = ₱${subtotal.toStringAsFixed(2)}",
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
                           ],
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                    // Services Section
-                    Text(
-                      "Services:",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.grey.shade700,
                       ),
                     ),
+                    const SizedBox(height: 16),
+                    Divider(thickness: 2, color: Colors.black87),
                     const SizedBox(height: 8),
-                    ...cart.map((item) {
-                      final price = (item["price"] as num).toDouble();
-                      final qty = (item["quantity"] ?? 0) as int;
-                      final subtotal = price * qty;
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          border: Border.all(color: Colors.grey.shade200),
-                          borderRadius: BorderRadius.circular(6),
+                    // Fixed Payment Section (Always Visible)
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Colors.yellow.shade100, Colors.yellow.shade50],
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "${item["code"]} - ${item["category"]}",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                              ),
+                        border: Border.all(color: Colors.black87, width: 2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "Total:",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                              color: Colors.black87,
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "₱${price.toStringAsFixed(2)} x $qty = ₱${subtotal.toStringAsFixed(2)}",
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade600,
-                              ),
+                          ),
+                          Text(
+                            "₱${total.toStringAsFixed(2)}",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 22,
+                              color: Colors.yellow.shade800,
                             ),
-                          ],
-                        ),
-                      );
-                    }),
-                    const Divider(thickness: 2),
-                    Text(
-                      "Total: ₱${total.toStringAsFixed(2)}",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                        color: Colors.green.shade700,
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: cashController,
+                      autofocus: true,
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
@@ -1936,44 +2478,40 @@ class _POSScreenState extends State<POSScreen> {
                         });
                       },
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: change >= 0 ? Colors.green.shade50 : Colors.red.shade50,
+                        color: change >= 0 ? Colors.yellow.shade50 : Colors.red.shade50,
                         border: Border.all(
-                          color: change >= 0 ? Colors.green.shade300 : Colors.red.shade300,
-                          width: 1.5,
+                          color: change >= 0 ? Colors.black87 : Colors.red.shade700,
+                          width: 2,
                         ),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
+                          const Text(
                             "Change:",
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: 18,
                               fontWeight: FontWeight.w600,
-                              color: Colors.grey.shade700,
+                              color: Colors.black87,
                             ),
                           ),
                           Text(
                             "₱${change.toStringAsFixed(2)}",
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                              color: change >= 0 ? Colors.green.shade700 : Colors.red.shade700,
+                              fontSize: 20,
+                              color: change >= 0 ? Colors.yellow.shade800 : Colors.red.shade700,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
+                    const SizedBox(height: 20),
             // Footer with buttons
             Row(
               children: [
@@ -1997,11 +2535,22 @@ class _POSScreenState extends State<POSScreen> {
                 Expanded(
                   flex: 2,
                   child: ElevatedButton(
-                    onPressed: (change < 0)
+                    onPressed: (cashController.text.trim().isEmpty || change < 0)
                         ? null
                         : () async {
                             final navigator = Navigator.of(context);
                             final cash = double.tryParse(cashController.text) ?? 0;
+
+                            // Extra validation: ensure cash is at least equal to total
+                            if (cash < total) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Cash amount must be at least equal to the total'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                              return;
+                            }
 
                             for (final item in cart) {
                               final code = item["code"] as String;
@@ -2018,22 +2567,28 @@ class _POSScreenState extends State<POSScreen> {
                             }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: change < 0 ? Colors.grey.shade300 : Colors.yellow.shade700,
-                      foregroundColor: change < 0 ? Colors.grey.shade600 : Colors.black87,
+                      backgroundColor: (cashController.text.trim().isEmpty || change < 0)
+                          ? Colors.grey.shade300
+                          : Colors.yellow.shade700,
+                      foregroundColor: (cashController.text.trim().isEmpty || change < 0)
+                          ? Colors.grey.shade600
+                          : Colors.black87,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                         side: BorderSide(
-                          color: change < 0 ? Colors.grey.shade400 : Colors.black54,
-                          width: 1,
+                          color: (cashController.text.trim().isEmpty || change < 0)
+                              ? Colors.grey.shade400
+                              : Colors.black87,
+                          width: (cashController.text.trim().isEmpty || change < 0) ? 1 : 2,
                         ),
                       ),
-                      elevation: change < 0 ? 0 : 4,
+                      elevation: (cashController.text.trim().isEmpty || change < 0) ? 0 : 4,
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.payment, size: 24),
+                        const Icon(Icons.payment, size: 24),
                         const SizedBox(width: 8),
                         const Text(
                           "Proceed to Payment",
@@ -2071,17 +2626,37 @@ class _POSScreenState extends State<POSScreen> {
         _selectedTime.minute,
       );
 
-      // 👤 Customer (unified shape)
-      final customerName = nameController.text.trim().isEmpty
-          ? "Did Not Specify"
-          : nameController.text.trim();
+      // 👤 Customer (unified shape) - prioritize text controllers as they are the source of truth
+      final customerName = nameController.text.trim().isNotEmpty
+          ? nameController.text.trim()
+          : (currentCustomer != null && currentCustomer!.name.isNotEmpty
+              ? currentCustomer!.name
+              : "Did Not Specify");
+
+      final plateNumber = plateController.text.trim().isNotEmpty
+          ? plateController.text.trim().toUpperCase()
+          : (currentCustomer != null && currentCustomer!.plateNumber.isNotEmpty
+              ? currentCustomer!.plateNumber
+              : "N/A");
+
+      final email = emailController.text.trim().isNotEmpty
+          ? emailController.text.trim()
+          : (currentCustomer != null && currentCustomer!.email.isNotEmpty
+              ? currentCustomer!.email
+              : "");
+
+      final contactNumber = phoneController.text.trim().isNotEmpty
+          ? phoneController.text.trim()
+          : (currentCustomer != null && currentCustomer!.contactNumber.isNotEmpty
+              ? currentCustomer!.contactNumber
+              : "");
 
       final customerMap = {
         "id": _currentCustomerId ?? currentCustomer?.id,
-        "plateNumber": plateController.text.trim().toUpperCase(),
+        "plateNumber": plateNumber,
         "name": customerName,
-        "email": emailController.text.trim(),
-        "contactNumber": phoneController.text.trim(),
+        "email": email,
+        "contactNumber": contactNumber,
         "vehicleType": _vehicleTypeForCustomer,
       };
 
@@ -2107,19 +2682,30 @@ class _POSScreenState extends State<POSScreen> {
 
       // 📘 Transactions collection (uses "services")
       final payload = {
-        "customer": customerMap,
+        // Flatten customer data to match Transaction model
+        "customerName": customerName,
+        "customerId": customerMap["id"],
+        "vehiclePlateNumber": plateNumber,
+        "contactNumber": contactNumber,
+        "vehicleType": _vehicleTypeForCustomer,
+        "customer": customerMap, // Keep nested for backward compatibility
         "services": services, // 🔑 unified key
+        "subtotal": totalAmount,
         "total": totalAmount,
         "cash": cash,
         "change": change,
         "date": Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
+        "transactionDate": Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
         "time": {
           "hour": _selectedTime.hour,
           "minute": _selectedTime.minute,
           "formatted": _formatTimeOfDay(context, _selectedTime),
         },
         "transactionAt": Timestamp.fromDate(txnDateTime),
-        "status": "paid",
+        "paymentMethod": "cash",
+        "paymentStatus": "paid",
+        "status": "completed",
+        "source": "pos",
         "assignedTeam": assignedTeam ?? "Unassigned",
         "teamCommission": 0.0, // Commission added only when booking is marked completed
         "createdAt": FieldValue.serverTimestamp(),
@@ -2233,6 +2819,9 @@ class _POSScreenState extends State<POSScreen> {
     for (final service in _services) {
       vehicleTypes.addAll(service.prices.keys);
     }
+    // Remove 'Standard' and 'Premium' as they are for repaint service only, not vehicle types
+    vehicleTypes.remove('Standard');
+    vehicleTypes.remove('Premium');
     return vehicleTypes.toList()..sort();
   }
 
@@ -2282,56 +2871,59 @@ class _POSScreenState extends State<POSScreen> {
         return StatefulBuilder(
           builder: (context, setState) {
             return Dialog(
-              insetPadding: const EdgeInsets.all(40),
-              child: Container(
-                width: MediaQuery.of(context).size.width * 0.6,
-                height: MediaQuery.of(context).size.height * 0.5,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.black87, width: 1.5),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
+              insetPadding: const EdgeInsets.all(20),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 500,
+                  maxHeight: MediaQuery.of(context).size.height * 0.7,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.groups, size: 40, color: Colors.blue.shade600),
-                        const SizedBox(width: 12),
-                        Text(
-                          "Assign Team",
-                          style: TextStyle(
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey.shade800,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      "Which team will handle this service?",
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey.shade700,
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.black87, width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
                       ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 40),
-                    // Content
-                    Expanded(
-                      child: Row(
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Header
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.groups, size: 28, color: Colors.blue.shade600),
+                          const SizedBox(width: 8),
+                          const Text(
+                            "Assign Team",
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        "Which team will handle this service?",
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.grey.shade700,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      // Content
+                      Row(
                         children: [
                           Expanded(
                             child: InkWell(
@@ -2340,10 +2932,10 @@ class _POSScreenState extends State<POSScreen> {
                                   selectedTeam = "Team A";
                                 });
                               },
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: BorderRadius.circular(12),
                               child: Container(
-                                height: 200,
-                                padding: const EdgeInsets.all(24),
+                                height: 140,
+                                padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
                                   gradient: selectedTeam == "Team A"
                                       ? LinearGradient(colors: [Colors.blue.shade100, Colors.blue.shade50])
@@ -2370,17 +2962,17 @@ class _POSScreenState extends State<POSScreen> {
                                   children: [
                                     Icon(
                                       Icons.group,
-                                      size: 64,
+                                      size: 48,
                                       color: selectedTeam == "Team A"
                                           ? Colors.blue.shade600
                                           : Colors.grey.shade600,
                                     ),
-                                    const SizedBox(height: 16),
+                                    const SizedBox(height: 12),
                                     Text(
                                       "Team A",
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
-                                        fontSize: 24,
+                                        fontSize: 18,
                                         color: selectedTeam == "Team A"
                                             ? Colors.blue.shade600
                                             : Colors.grey.shade700,
@@ -2391,7 +2983,7 @@ class _POSScreenState extends State<POSScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 16),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: InkWell(
                               onTap: () {
@@ -2399,10 +2991,10 @@ class _POSScreenState extends State<POSScreen> {
                                   selectedTeam = "Team B";
                                 });
                               },
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: BorderRadius.circular(12),
                               child: Container(
-                                height: 200,
-                                padding: const EdgeInsets.all(24),
+                                height: 140,
+                                padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
                                   gradient: selectedTeam == "Team B"
                                       ? LinearGradient(colors: [Colors.green.shade100, Colors.green.shade50])
@@ -2429,17 +3021,17 @@ class _POSScreenState extends State<POSScreen> {
                                   children: [
                                     Icon(
                                       Icons.group,
-                                      size: 64,
+                                      size: 48,
                                       color: selectedTeam == "Team B"
                                           ? Colors.green.shade600
                                           : Colors.grey.shade600,
                                     ),
-                                    const SizedBox(height: 16),
+                                    const SizedBox(height: 12),
                                     Text(
                                       "Team B",
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
-                                        fontSize: 24,
+                                        fontSize: 18,
                                         color: selectedTeam == "Team B"
                                             ? Colors.green.shade600
                                             : Colors.grey.shade700,
@@ -2452,12 +3044,11 @@ class _POSScreenState extends State<POSScreen> {
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 32),
-                    // Actions Row
-                    Row(
-                      children: [
-                        Expanded(
+                      const SizedBox(height: 20),
+                      // Actions Row
+                      Row(
+                        children: [
+                          Expanded(
                           child: ElevatedButton(
                             onPressed: selectedTeam != null
                                 ? () async {
@@ -2514,7 +3105,8 @@ class _POSScreenState extends State<POSScreen> {
                         ),
                       ],
                     ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             );
@@ -3041,26 +3633,6 @@ class _POSScreenState extends State<POSScreen> {
                                         width: double.infinity,
                                         child: pw.Column(
                                           children: [
-                                            pw.Row(
-                                              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                                              children: [
-                                                pw.Text(
-                                                  "SUBTOTAL:",
-                                                  style: pw.TextStyle(
-                                                    font: regularFont,
-                                                    fontSize: 9,
-                                                  ),
-                                                ),
-                                                pw.Text(
-                                                  "P${total.toStringAsFixed(2)}",
-                                                  style: pw.TextStyle(
-                                                    font: regularFont,
-                                                    fontSize: 9,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            pw.SizedBox(height: 2),
                                             pw.Row(
                                               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                                               children: [
