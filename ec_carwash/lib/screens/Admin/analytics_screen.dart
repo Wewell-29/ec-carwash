@@ -5,6 +5,7 @@ import 'package:ec_carwash/data_models/expense_data.dart';
 import 'package:ec_carwash/utils/csv_importer.dart';
 import 'package:ec_carwash/data_models/unified_transaction_data.dart' as txn_model;
 import 'package:file_picker/file_picker.dart';
+import 'package:intl/intl.dart';
 import 'dart:convert';
 
 class AnalyticsScreen extends StatefulWidget {
@@ -143,7 +144,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             if (daysDiff <= 1) {
               timeKey = createdAt.hour; // Hours for single day
             } else if (daysDiff <= 31) {
-              timeKey = createdAt.day; // Days for up to a month
+              // Use day offset from start date (0, 1, 2, ... n)
+              timeKey = createdAt.difference(DateTime(startDate.year, startDate.month, startDate.day)).inDays;
             } else if (daysDiff <= 366) {
               timeKey = createdAt.month; // Months for up to a year
             } else {
@@ -204,7 +206,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             if (daysDiff <= 1) {
               timeKey = transactionAt.hour;
             } else if (daysDiff <= 31) {
-              timeKey = transactionAt.day;
+              // Use day offset from start date (0, 1, 2, ... n)
+              timeKey = transactionAt.difference(DateTime(startDate.year, startDate.month, startDate.day)).inDays;
             } else if (daysDiff <= 366) {
               timeKey = transactionAt.month;
             } else {
@@ -633,29 +636,39 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         }
         break;
       case 'custom':
-        // Determine based on data keys
-        if (_peakTimeData.isEmpty) {
+        // Determine based on date range
+        if (_startDate == null || _endDate == null) {
           chartTitle = 'Peak Times';
           chartSubtitle = 'No data available';
         } else {
-          final sampleKey = _peakTimeData.keys.first;
-          if (sampleKey is int && sampleKey >= 0 && sampleKey <= 23) {
+          final daysDiff = _endDate!.difference(_startDate!).inDays;
+          if (daysDiff <= 1) {
             chartTitle = 'Peak Operating Hours';
             chartSubtitle = 'Busiest times in selected period';
             for (int hour = 8; hour <= 18; hour++) {
               completeData[hour] = _peakTimeData[hour] ?? 0;
             }
-          } else if (sampleKey is int && sampleKey >= 1 && sampleKey <= 31) {
+          } else if (daysDiff <= 31) {
             chartTitle = 'Peak Operating Days';
             chartSubtitle = 'Busiest days in selected period';
-            for (int day = 1; day <= 31; day++) {
-              completeData[day] = _peakTimeData[day] ?? 0;
+            // Use day offset (0 to daysDiff)
+            for (int dayOffset = 0; dayOffset <= daysDiff; dayOffset++) {
+              completeData[dayOffset] = _peakTimeData[dayOffset] ?? 0;
             }
-          } else {
+          } else if (daysDiff <= 366) {
             chartTitle = 'Peak Operating Months';
             chartSubtitle = 'Busiest months in selected period';
             for (int month = 1; month <= 12; month++) {
               completeData[month] = _peakTimeData[month] ?? 0;
+            }
+          } else {
+            chartTitle = 'Peak Operating Years';
+            chartSubtitle = 'Busiest years in selected period';
+            // Get the year range
+            final startYear = _startDate!.year;
+            final endYear = _endDate!.year;
+            for (int year = startYear; year <= endYear; year++) {
+              completeData[year] = _peakTimeData[year] ?? 0;
             }
           }
         }
@@ -905,19 +918,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
         return value >= 1 && value <= 12 ? months[value - 1] : 'Month $value';
       case 'custom':
-        // Determine based on value range
-        if (value >= 0 && value <= 23) {
-          final period = value >= 12 ? 'PM' : 'AM';
-          final displayHour = value == 0 ? 12 : (value > 12 ? value - 12 : value);
-          return '$displayHour:00 $period';
-        } else if (value >= 1 && value <= 31) {
-          return 'Day $value';
-        } else if (value >= 1 && value <= 12) {
-          const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-          return months[value - 1];
-        } else {
-          return 'Day $value';
+        // Determine based on actual date range
+        if (_startDate != null && _endDate != null) {
+          final daysDiff = _endDate!.difference(_startDate!).inDays;
+          if (daysDiff <= 1) {
+            // Hours
+            final period = value >= 12 ? 'PM' : 'AM';
+            final displayHour = value == 0 ? 12 : (value > 12 ? value - 12 : value);
+            return '$displayHour:00 $period';
+          } else if (daysDiff <= 31) {
+            // Day offset - show actual date
+            final actualDate = _startDate!.add(Duration(days: value));
+            return DateFormat('MMM d').format(actualDate);
+          } else if (daysDiff <= 366) {
+            // Months
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            return value >= 1 && value <= 12 ? months[value - 1] : 'Month $value';
+          } else {
+            // Years
+            return value.toString();
+          }
         }
+        return 'Day $value';
       default:
         return value.toString();
     }

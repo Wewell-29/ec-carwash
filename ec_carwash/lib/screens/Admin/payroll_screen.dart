@@ -350,13 +350,52 @@ class _PayrollScreenState extends State<PayrollScreen> {
         return;
       }
 
+      // Get all completed bookings for this team in the period
+      final bookingsSnapshot = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('status', isEqualTo: 'completed')
+          .where('assignedTeam', isEqualTo: teamName)
+          .get();
+
+      // Filter bookings within the period and not yet disbursed
+      final bookingsInPeriod = bookingsSnapshot.docs.where((doc) {
+        final data = doc.data();
+        final completedAt = (data['updatedAt'] as Timestamp?)?.toDate();
+        final alreadyPaid = data['salaryDisbursed'] as bool? ?? false;
+
+        if (completedAt == null || alreadyPaid) return false;
+
+        return completedAt.isAfter(selectedDisbursementStartDate.subtract(const Duration(seconds: 1))) &&
+               completedAt.isBefore(selectedDisbursementEndDate.add(const Duration(seconds: 1)));
+      }).toList();
+
+      if (bookingsInPeriod.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('No unpaid bookings found for $teamName in this period'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Calculate actual amount for this period
+      double actualAmount = 0.0;
+      for (final doc in bookingsInPeriod) {
+        final commission = (doc.data()['teamCommission'] as num?)?.toDouble() ?? 0.0;
+        actualAmount += commission;
+      }
+
       // Save disbursement record
       await FirebaseFirestore.instance
           .collection('PayrollDisbursements')
           .doc(docId)
           .set({
         'teamName': teamName,
-        'amount': commission,
+        'amount': actualAmount,
+        'bookingCount': bookingsInPeriod.length,
         'periodStartDate': Timestamp.fromDate(selectedDisbursementStartDate),
         'periodEndDate': Timestamp.fromDate(selectedDisbursementEndDate),
         'disbursementDate': Timestamp.fromDate(selectedDisbursementDate),
@@ -365,14 +404,26 @@ class _PayrollScreenState extends State<PayrollScreen> {
         'disbursedBy': 'Admin', // TODO: Get from auth
       });
 
+      // Mark all bookings in this period as paid
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in bookingsInPeriod) {
+        batch.update(doc.reference, {
+          'salaryDisbursed': true,
+          'salaryDisbursedDate': Timestamp.fromDate(selectedDisbursementDate),
+          'salaryDisbursementId': docId,
+        });
+      }
+      await batch.commit();
+
       // Reload data to update status
       await _loadPayrollData();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Salary disbursed to $teamName successfully'),
+            content: Text('₱${actualAmount.toStringAsFixed(2)} disbursed to $teamName (${bookingsInPeriod.length} jobs)'),
             backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -389,24 +440,52 @@ class _PayrollScreenState extends State<PayrollScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Query completed bookings only (show all time totals)
+      // Get all disbursement records
+      final disbursementsSnapshot = await FirebaseFirestore.instance
+          .collection('PayrollDisbursements')
+          .get();
+
+      // Track disbursement status for each team
+      Map<String, bool> teamHasDisbursement = {'Team A': false, 'Team B': false};
+      Map<String, DateTime?> teamLatestDisbursement = {'Team A': null, 'Team B': null};
+
+      for (final doc in disbursementsSnapshot.docs) {
+        final data = doc.data();
+        final team = data['teamName'] as String?;
+        final isDisbursed = data['isDisbursed'] as bool? ?? false;
+        final disbursedAt = (data['disbursedAt'] as Timestamp?)?.toDate();
+
+        if (team != null && isDisbursed) {
+          teamHasDisbursement[team] = true;
+
+          // Track the latest disbursement date
+          if (disbursedAt != null) {
+            if (teamLatestDisbursement[team] == null ||
+                disbursedAt.isAfter(teamLatestDisbursement[team]!)) {
+              teamLatestDisbursement[team] = disbursedAt;
+            }
+          }
+        }
+      }
+
+      // Query completed bookings only
       final bookingsSnapshot = await FirebaseFirestore.instance
           .collection('Bookings')
           .where('status', isEqualTo: 'completed')
           .get();
 
-      // Calculate commissions
+      // Calculate commissions for unpaid bookings only
       Map<String, double> commissions = {'Team A': 0.0, 'Team B': 0.0};
       Map<String, int> counts = {'Team A': 0, 'Team B': 0};
 
-      // Process completed bookings only (single source of truth)
       for (final doc in bookingsSnapshot.docs) {
         final data = doc.data();
         final team = data['assignedTeam'] as String?;
         final commission = (data['teamCommission'] as num?)?.toDouble() ?? 0.0;
+        final isPaid = data['salaryDisbursed'] as bool? ?? false;
 
-        // Skip if no team assigned
-        if (team == null || !commissions.containsKey(team)) {
+        // Skip if no team assigned or already paid
+        if (team == null || !commissions.containsKey(team) || isPaid) {
           continue;
         }
 
@@ -414,9 +493,17 @@ class _PayrollScreenState extends State<PayrollScreen> {
         counts[team] = counts[team]! + 1;
       }
 
+      // Update disbursement status: show as disbursed only if there are no pending commissions
+      Map<String, bool> finalDisbursementStatus = {
+        'Team A': commissions['Team A'] == 0.0 && teamHasDisbursement['Team A']!,
+        'Team B': commissions['Team B'] == 0.0 && teamHasDisbursement['Team B']!,
+      };
+
       setState(() {
         _teamCommissions = commissions;
         _teamBookingCounts = counts;
+        _teamDisbursementStatus = finalDisbursementStatus;
+        _teamDisbursementDate = teamLatestDisbursement;
         _isLoading = false;
       });
     } catch (e) {
@@ -571,7 +658,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
                         ),
                       ),
                       Text(
-                        'Total Commissions (All Time)',
+                        'Pending Commission',
                         style: TextStyle(
                           fontSize: 14,
                           color: Colors.black.withValues(alpha: 0.6),
@@ -590,7 +677,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Total Commission',
+                        'Pending Amount',
                         style: TextStyle(
                           fontSize: 15,
                           color: Colors.black.withValues(alpha: 0.7),
@@ -623,7 +710,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Jobs Completed',
+                        'Unpaid Jobs',
                         style: TextStyle(
                           fontSize: 15,
                           color: Colors.black.withValues(alpha: 0.7),
@@ -665,25 +752,25 @@ class _PayrollScreenState extends State<PayrollScreen> {
                       Row(
                         children: [
                           Icon(
-                            isDisbursed ? Icons.check_circle : Icons.pending,
-                            color: isDisbursed ? Colors.green : Colors.orange,
+                            commission == 0.0 ? Icons.check_circle : Icons.pending,
+                            color: commission == 0.0 ? Colors.green : Colors.orange,
                             size: 20,
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            isDisbursed ? 'Disbursed' : 'Pending',
+                            commission == 0.0 ? 'All Paid' : 'Has Pending',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: isDisbursed ? Colors.green : Colors.orange,
+                              color: commission == 0.0 ? Colors.green : Colors.orange,
                             ),
                           ),
                         ],
                       ),
-                      if (isDisbursed && disbursementDate != null) ...[
+                      if (disbursementDate != null) ...[
                         const SizedBox(height: 4),
                         Text(
-                          'Disbursed on ${disbursementDate.toString().substring(0, 16)}',
+                          'Last disbursement: ${DateFormat('MMM dd, yyyy').format(disbursementDate)}',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.black.withValues(alpha: 0.6),
@@ -695,17 +782,17 @@ class _PayrollScreenState extends State<PayrollScreen> {
                 ),
                 const SizedBox(width: 12),
                 ElevatedButton.icon(
-                  onPressed: isDisbursed ? null : () => _disburseSalary(teamName, commission),
+                  onPressed: (commission == 0.0) ? null : () => _disburseSalary(teamName, commission),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isDisbursed ? Colors.grey : Colors.yellow.shade700,
+                    backgroundColor: (commission == 0.0) ? Colors.grey : Colors.yellow.shade700,
                     foregroundColor: Colors.black87,
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                     disabledBackgroundColor: Colors.grey.shade300,
                     disabledForegroundColor: Colors.grey.shade600,
                   ),
-                  icon: Icon(isDisbursed ? Icons.check : Icons.payment),
+                  icon: Icon((commission == 0.0) ? Icons.check : Icons.payment),
                   label: Text(
-                    isDisbursed ? 'Already Disbursed' : 'Disburse Salary',
+                    (commission == 0.0) ? 'No Pending Amount' : 'Disburse Salary',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
