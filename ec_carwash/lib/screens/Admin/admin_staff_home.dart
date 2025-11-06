@@ -32,7 +32,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
   double _todayPayrollCommission = 0.0; // Add payroll commission tracking
   int _pendingBookings = 0;
   List<Map<String, dynamic>> _recentTransactions = [];
-  List<Map<String, dynamic>> _pendingBookingsList = [];
+  List<Map<String, dynamic>> _approvedBookingsList = [];
 
   @override
   void initState() {
@@ -112,23 +112,22 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         endDate: endOfDay,
       );
 
-      double todayExp = expensesSnapshot.fold(0.0, (sum, expense) => sum + expense.amount);
+      double todayExp = expensesSnapshot.fold(0.0, (total, expense) => total + expense.amount);
 
-      // Load today's pending bookings awaiting approval
-      final bookingsSnapshot = await FirebaseFirestore.instance
+      // Load pending bookings from mobile app (today only for notification badge)
+      final pendingBookingsSnapshot = await FirebaseFirestore.instance
           .collection('Bookings')
           .where('status', isEqualTo: 'pending')
           .get();
 
       List<Map<String, dynamic>> pendingBookings = [];
-      for (final doc in bookingsSnapshot.docs) {
+      for (final doc in pendingBookingsSnapshot.docs) {
         final data = doc.data();
-        // Use unified scheduledDateTime field (with fallback for legacy data)
         final scheduledDate = (data['scheduledDateTime'] as Timestamp?)?.toDate() ??
                              (data['selectedDateTime'] as Timestamp?)?.toDate() ??
                              (data['scheduledDate'] as Timestamp?)?.toDate();
 
-        // Only include today's bookings
+        // Only include today's pending bookings for notification badge
         if (scheduledDate != null &&
             scheduledDate.year == today.year &&
             scheduledDate.month == today.month &&
@@ -146,8 +145,53 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         }
       }
 
-      // Sort by scheduledDate chronologically (oldest first)
+      // Load approved bookings for today only (for pending services card)
+      final approvedBookingsSnapshot = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      List<Map<String, dynamic>> approvedBookings = [];
+      for (final doc in approvedBookingsSnapshot.docs) {
+        final data = doc.data();
+        final scheduledDate = (data['scheduledDateTime'] as Timestamp?)?.toDate() ??
+                             (data['selectedDateTime'] as Timestamp?)?.toDate() ??
+                             (data['scheduledDate'] as Timestamp?)?.toDate();
+
+        // Only include today's bookings
+        if (scheduledDate != null &&
+            scheduledDate.year == today.year &&
+            scheduledDate.month == today.month &&
+            scheduledDate.day == today.day) {
+
+          final services = data['services'] as List?;
+          final serviceNames = services?.map((s) => s['serviceName'] ?? '').join(', ') ?? 'No services';
+
+          approvedBookings.add({
+            'id': doc.id,
+            'plateNumber': data['plateNumber'] ?? data['vehiclePlateNumber'] ?? 'No Plate',
+            'services': serviceNames,
+            'scheduledDate': scheduledDate,
+          });
+        }
+      }
+
+      // Limit to 5 results
+      if (approvedBookings.length > 5) {
+        approvedBookings = approvedBookings.sublist(0, 5);
+      }
+
+      // Sort both by scheduledDate
       pendingBookings.sort((a, b) {
+        final dateA = a['scheduledDate'] as DateTime?;
+        final dateB = b['scheduledDate'] as DateTime?;
+        if (dateA == null && dateB == null) return 0;
+        if (dateA == null) return 1;
+        if (dateB == null) return -1;
+        return dateA.compareTo(dateB);
+      });
+
+      approvedBookings.sort((a, b) {
         final dateA = a['scheduledDate'] as DateTime?;
         final dateB = b['scheduledDate'] as DateTime?;
         if (dateA == null && dateB == null) return 0;
@@ -163,7 +207,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
           _todayExpenses = todayExp;
           _todayPayrollCommission = todayCommission;
           _pendingBookings = pendingBookings.length;
-          _pendingBookingsList = pendingBookings;
+          _approvedBookingsList = approvedBookings;
           _recentTransactions = recentTxns;
           _isDashboardLoading = false;
         });
@@ -1013,32 +1057,54 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
 
           const SizedBox(height: 24),
 
-          // Recent Activity Section - 3 cards
+          // Recent Activity Section - Responsive width cards
           LayoutBuilder(
             builder: (context, constraints) {
-              final isWide = constraints.maxWidth > 1200;
-              if (isWide) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: _buildRecentTransactionsCard()),
-                    const SizedBox(width: 16),
-                    Expanded(child: _buildPendingServicesCard()),
-                    const SizedBox(width: 16),
-                    Expanded(child: _buildLowStockCard()),
-                  ],
-                );
-              } else {
-                return Column(
-                  children: [
-                    _buildRecentTransactionsCard(),
-                    const SizedBox(height: 16),
-                    _buildPendingServicesCard(),
-                    const SizedBox(height: 16),
-                    _buildLowStockCard(),
-                  ],
-                );
-              }
+              // Calculate card width based on available space
+              // Use 3 cards if wide enough, otherwise scroll
+              final isWide = constraints.maxWidth > 1400;
+              final cardWidth = isWide
+                  ? (constraints.maxWidth - 64) / 3  // 3 cards with spacing
+                  : constraints.maxWidth * 0.85;      // Single card width when narrow
+
+              return SizedBox(
+                height: 500,
+                child: isWide
+                    ? Row(
+                        children: [
+                          Expanded(child: _buildRecentTransactionsCard()),
+                          const SizedBox(width: 16),
+                          Expanded(child: _buildPendingServicesCard()),
+                          const SizedBox(width: 16),
+                          Expanded(child: _buildLowStockCard()),
+                        ],
+                      )
+                    : SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: cardWidth,
+                              height: 500,
+                              child: _buildRecentTransactionsCard(),
+                            ),
+                            const SizedBox(width: 16),
+                            SizedBox(
+                              width: cardWidth,
+                              height: 500,
+                              child: _buildPendingServicesCard(),
+                            ),
+                            const SizedBox(width: 16),
+                            SizedBox(
+                              width: cardWidth,
+                              height: 500,
+                              child: _buildLowStockCard(),
+                            ),
+                          ],
+                        ),
+                      ),
+              );
             },
           ),
         ],
@@ -1207,22 +1273,21 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
             ),
           ),
           const Divider(height: 1, thickness: 1.5, color: Colors.black87),
-          _recentTransactions.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                    child: Text(
-                      'No transactions today',
-                      style: TextStyle(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        fontSize: 14,
+          Expanded(
+            child: _recentTransactions.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Center(
+                      child: Text(
+                        'No transactions today',
+                        style: TextStyle(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          fontSize: 14,
+                        ),
                       ),
                     ),
-                  ),
-                )
-              : ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
+                  )
+                : ListView.separated(
                   itemCount: _recentTransactions.length > 5 ? 5 : _recentTransactions.length,
                   separatorBuilder: (context, index) => Divider(
                     height: 1,
@@ -1267,12 +1332,13 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                     );
                   },
                 ),
+          ),
         ],
       ),
     );
   }
 
-  /// Pending Services Card
+  /// Pending Services Card - Shows approved bookings
   Widget _buildPendingServicesCard() {
     return Card(
       color: Colors.yellow.shade50,
@@ -1307,7 +1373,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                     border: Border.all(color: Colors.black87, width: 1),
                   ),
                   child: Text(
-                    '$_pendingBookings',
+                    '${_approvedBookingsList.length}',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.black87,
@@ -1319,27 +1385,25 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
             ),
           ),
           const Divider(height: 1, thickness: 1.5, color: Colors.black87),
-          _pendingBookingsList.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                    child: Text(
-                      'No upcoming bookings',
-                      style: TextStyle(
-                        color: Colors.black.withValues(alpha: 0.6),
-                        fontSize: 14,
+          Expanded(
+            child: _approvedBookingsList.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Center(
+                      child: Text(
+                        'No upcoming bookings',
+                        style: TextStyle(
+                          color: Colors.black.withValues(alpha: 0.6),
+                          fontSize: 14,
+                        ),
                       ),
                     ),
-                  ),
-                )
-              : SizedBox(
-                  height: 300,
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: _pendingBookingsList.length > 5 ? 5 : _pendingBookingsList.length,
+                  )
+                : ListView.separated(
+                    itemCount: _approvedBookingsList.length,
                     separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.black87),
                     itemBuilder: (context, index) {
-                      final booking = _pendingBookingsList[index];
+                      final booking = _approvedBookingsList[index];
                       final scheduledDate = booking['scheduledDate'] as DateTime?;
                       final plateNumber = booking['plateNumber'] as String;
                       final services = booking['services'] as String;
@@ -1439,23 +1503,21 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
             ),
           ),
           const Divider(height: 1, thickness: 1.5, color: Colors.black87),
-          _lowStockItems.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                    child: Text(
-                      'All items in stock',
-                      style: TextStyle(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        fontSize: 14,
+          Expanded(
+            child: _lowStockItems.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Center(
+                      child: Text(
+                        'All items in stock',
+                        style: TextStyle(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          fontSize: 14,
+                        ),
                       ),
                     ),
-                  ),
-                )
-              : SizedBox(
-                  height: 300,
-                  child: ListView.separated(
-                    shrinkWrap: true,
+                  )
+                : ListView.separated(
                     itemCount: _lowStockItems.length,
                     separatorBuilder: (context, index) => Divider(
                       height: 1,
@@ -1519,7 +1581,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                       );
                     },
                   ),
-                ),
+          ),
         ],
       ),
     );

@@ -409,7 +409,7 @@ List<Service> initialServices = [
   ),
   Service(
     id: '',
-    code: 'EC16',
+    code: 'RPT',
     name: 'Repaint Service',
     category: 'Paint',
     description: 'Professional vehicle repainting service - price per panel',
@@ -642,7 +642,7 @@ class ServicesManager {
   }
 
   static Future<List<String>> getCategories() async {
-    final services = await getServices();
+    final services = await getAllServices();
     return services.map((service) => service.category).toSet().toList();
   }
 

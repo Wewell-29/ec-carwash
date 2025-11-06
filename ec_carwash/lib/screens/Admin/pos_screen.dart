@@ -398,8 +398,8 @@ class _POSScreenState extends State<POSScreen> {
     final product = servicesData[code];
     if (product == null) return;
 
-    // Special handling for Repaint Service (EC16) - show panel selection
-    if (code == 'EC16') {
+    // Special handling for Repaint Service (RPT) - show panel selection
+    if (code == 'RPT') {
       _showRepaintPanelDialog();
       return;
     }
@@ -480,7 +480,7 @@ class _POSScreenState extends State<POSScreen> {
 
   // Special dialog for Repaint Service - select quality and number of panels
   void _showRepaintPanelDialog() {
-    final product = servicesData['EC16'];
+    final product = servicesData['RPT'];
     if (product == null) return;
 
     final prices = product["prices"] as Map<String, dynamic>;
@@ -805,7 +805,7 @@ class _POSScreenState extends State<POSScreen> {
                   Navigator.pop(context);
 
                   // Check if repaint already exists in cart
-                  final existingIndex = cart.indexWhere((item) => item["code"] == 'EC16');
+                  final existingIndex = cart.indexWhere((item) => item["code"] == 'RPT');
                   if (existingIndex >= 0) {
                     // Update quantity and price
                     setState(() {
@@ -825,7 +825,7 @@ class _POSScreenState extends State<POSScreen> {
                     // Add new repaint service
                     setState(() {
                       cart.add({
-                        "code": 'EC16',
+                        "code": 'RPT',
                         "name": product["name"],
                         "category": selectedQuality,
                         "price": pricePerPanel,
@@ -930,7 +930,7 @@ class _POSScreenState extends State<POSScreen> {
           children: [
             // Product Codes Grid
             Expanded(
-              flex: responsive.isTablet ? 3 : 4,
+              flex: responsive.isTablet ? 5 : 6,
               child: OrientationBuilder(
                 builder: (context, orientation) {
                   return GridView.builder(
@@ -948,8 +948,10 @@ class _POSScreenState extends State<POSScreen> {
                       if (product == null) return const SizedBox();
 
                       // Check if service is applicable for current vehicle type
+                      // Exception: RPT/EC16 (Repaint) uses Standard/Premium pricing, always applicable
                       final prices = product["prices"] as Map<String, dynamic>;
-                      final bool isApplicable = _vehicleTypeForCustomer == null ||
+                      final bool isApplicable = code == 'RPT' || code == 'EC16' ||
+                                               _vehicleTypeForCustomer == null ||
                                                _vehicleTypeForCustomer!.isEmpty ||
                                                prices.containsKey(_vehicleTypeForCustomer);
 
@@ -1057,23 +1059,6 @@ class _POSScreenState extends State<POSScreen> {
                                             maxLines: 3,
                                             overflow: TextOverflow.ellipsis,
                                           ),
-                                          // Show description only on tablet and desktop, hide on mobile
-                                          if (!responsive.isMobile && product["description"] != null && product["description"].toString().isNotEmpty) ...[
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              product["description"],
-                                              textAlign: TextAlign.center,
-                                              style: const TextStyle(
-                                                fontSize: 9,
-                                                fontWeight: FontWeight.w400,
-                                                color: Colors.grey,
-                                                height: 1.2,
-                                                letterSpacing: 0.1,
-                                              ),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ],
                                         ],
                                       ),
                                     ),
@@ -1316,119 +1301,126 @@ class _POSScreenState extends State<POSScreen> {
               ] else ...[
                 // Quick Search Mode
                 // Search Type Chooser
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
                       'Search by:',
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         color: Colors.black87,
-                        fontSize: 14,
+                        fontSize: 13,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: InkWell(
-                              onTap: () {
-                                setState(() {
-                                  _searchType = 'plate';
-                                  plateController.clear();
-                                  _searchResults.clear();
-                                  _hasSearched = false;
-                                });
-                              },
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                                decoration: BoxDecoration(
-                                  gradient: _searchType == 'plate'
-                                      ? LinearGradient(
-                                          colors: [Colors.yellow.shade700, Colors.yellow.shade600],
-                                        )
-                                      : null,
-                                  color: _searchType == 'plate' ? null : Colors.grey.shade200,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: _searchType == 'plate' ? Colors.black87 : Colors.grey.shade400,
-                                    width: _searchType == 'plate' ? 2 : 1,
-                                  ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              setState(() {
+                                _searchType = 'plate';
+                                plateController.clear();
+                                _searchResults.clear();
+                                _hasSearched = false;
+                              });
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                              decoration: BoxDecoration(
+                                gradient: _searchType == 'plate'
+                                    ? LinearGradient(
+                                        colors: [Colors.yellow.shade700, Colors.yellow.shade600],
+                                      )
+                                    : null,
+                                color: _searchType == 'plate' ? null : Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _searchType == 'plate' ? Colors.black87 : Colors.grey.shade400,
+                                  width: _searchType == 'plate' ? 2 : 1,
                                 ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.pin,
-                                      size: 18,
-                                      color: _searchType == 'plate' ? Colors.black87 : Colors.grey.shade600,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'License Plate',
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.pin,
+                                    size: 16,
+                                    color: _searchType == 'plate' ? Colors.black87 : Colors.grey.shade600,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      'License',
                                       style: TextStyle(
                                         fontWeight: _searchType == 'plate' ? FontWeight.bold : FontWeight.w500,
-                                        fontSize: 13,
+                                        fontSize: 12,
                                         color: _searchType == 'plate' ? Colors.black87 : Colors.grey.shade700,
                                       ),
+                                      overflow: TextOverflow.ellipsis,
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: InkWell(
-                              onTap: () {
-                                setState(() {
-                                  _searchType = 'name';
-                                  plateController.clear();
-                                  _searchResults.clear();
-                                  _hasSearched = false;
-                                });
-                              },
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                                decoration: BoxDecoration(
-                                  gradient: _searchType == 'name'
-                                      ? LinearGradient(
-                                          colors: [Colors.yellow.shade700, Colors.yellow.shade600],
-                                        )
-                                      : null,
-                                  color: _searchType == 'name' ? null : Colors.grey.shade200,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: _searchType == 'name' ? Colors.black87 : Colors.grey.shade400,
-                                    width: _searchType == 'name' ? 2 : 1,
-                                  ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              setState(() {
+                                _searchType = 'name';
+                                plateController.clear();
+                                _searchResults.clear();
+                                _hasSearched = false;
+                              });
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                              decoration: BoxDecoration(
+                                gradient: _searchType == 'name'
+                                    ? LinearGradient(
+                                        colors: [Colors.yellow.shade700, Colors.yellow.shade600],
+                                      )
+                                    : null,
+                                color: _searchType == 'name' ? null : Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _searchType == 'name' ? Colors.black87 : Colors.grey.shade400,
+                                  width: _searchType == 'name' ? 2 : 1,
                                 ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.person,
-                                      size: 18,
-                                      color: _searchType == 'name' ? Colors.black87 : Colors.grey.shade600,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'Customer Name',
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.person,
+                                    size: 16,
+                                    color: _searchType == 'name' ? Colors.black87 : Colors.grey.shade600,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      'Name',
                                       style: TextStyle(
                                         fontWeight: _searchType == 'name' ? FontWeight.bold : FontWeight.w500,
-                                        fontSize: 13,
+                                        fontSize: 12,
                                         color: _searchType == 'name' ? Colors.black87 : Colors.grey.shade700,
                                       ),
+                                      overflow: TextOverflow.ellipsis,
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -2024,7 +2016,7 @@ class _POSScreenState extends State<POSScreen> {
           // Cart header with theme styling
           Container(
             width: double.infinity,
-            padding: EdgeInsets.all(isTablet ? 12 : 16),
+            padding: EdgeInsets.all(isTablet ? 10 : 12),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [Colors.yellow.shade700, Colors.yellow.shade800],
@@ -2042,14 +2034,14 @@ class _POSScreenState extends State<POSScreen> {
                 Icon(
                   Icons.shopping_cart,
                   color: Colors.black87,
-                  size: isTablet ? 20 : 24,
+                  size: isTablet ? 18 : 20,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Text(
                   "Cart",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: isTablet ? 16 : 18,
+                    fontSize: isTablet ? 14 : 16,
                     color: Colors.black87,
                     letterSpacing: 0.5,
                   ),
@@ -2079,19 +2071,20 @@ class _POSScreenState extends State<POSScreen> {
             child: cart.isEmpty
                 ? Center(
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
                           Icons.shopping_cart_outlined,
-                          size: isTablet ? 48 : 64,
+                          size: isTablet ? 40 : 48,
                           color: Colors.grey.shade400,
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         Text(
                           "No items in cart",
                           style: TextStyle(
                             color: Colors.grey.shade600,
-                            fontSize: isTablet ? 14 : 16,
+                            fontSize: isTablet ? 12 : 14,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -2099,7 +2092,7 @@ class _POSScreenState extends State<POSScreen> {
                     ),
                   )
                 : ListView.builder(
-                    padding: EdgeInsets.all(isTablet ? 8 : 12),
+                    padding: EdgeInsets.all(isTablet ? 6 : 8),
                     itemCount: cart.length,
                     itemBuilder: (context, index) {
                       final item = cart[index];
@@ -2108,7 +2101,7 @@ class _POSScreenState extends State<POSScreen> {
                       final subtotal = price * qty;
 
                       return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
+                        margin: const EdgeInsets.only(bottom: 6),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           border: Border.all(color: Colors.black26, width: 0.5),
@@ -2123,8 +2116,8 @@ class _POSScreenState extends State<POSScreen> {
                         ),
                         child: ListTile(
                           contentPadding: EdgeInsets.symmetric(
-                            horizontal: isTablet ? 12 : 16,
-                            vertical: isTablet ? 4 : 8,
+                            horizontal: isTablet ? 10 : 12,
+                            vertical: isTablet ? 2 : 4,
                           ),
                           leading: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -2148,14 +2141,14 @@ class _POSScreenState extends State<POSScreen> {
                             item["category"],
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
-                              fontSize: isTablet ? 13 : 14,
+                              fontSize: isTablet ? 12 : 13,
                               color: Colors.grey.shade800,
                             ),
                           ),
                           subtitle: Text(
                             "₱${price.toStringAsFixed(2)} x $qty = ₱${subtotal.toStringAsFixed(2)}",
                             style: TextStyle(
-                              fontSize: isTablet ? 11 : 12,
+                              fontSize: isTablet ? 10 : 11,
                               color: Colors.grey.shade600,
                               fontWeight: FontWeight.w500,
                             ),
@@ -2170,10 +2163,10 @@ class _POSScreenState extends State<POSScreen> {
                               icon: Icon(
                                 Icons.remove_circle_outline,
                                 color: Colors.red.shade600,
-                                size: isTablet ? 20 : 24,
+                                size: isTablet ? 18 : 20,
                               ),
                               onPressed: () => removeFromCart(index),
-                              padding: EdgeInsets.all(isTablet ? 4 : 8),
+                              padding: EdgeInsets.all(isTablet ? 3 : 6),
                               constraints: const BoxConstraints(),
                             ),
                           ),
@@ -2184,7 +2177,7 @@ class _POSScreenState extends State<POSScreen> {
           ),
           // Cart footer with total and checkout
           Container(
-            padding: EdgeInsets.all(isTablet ? 12 : 16),
+            padding: EdgeInsets.all(isTablet ? 10 : 12),
             decoration: BoxDecoration(
               color: Colors.white,
               border: Border(
@@ -2196,6 +2189,7 @@ class _POSScreenState extends State<POSScreen> {
               ),
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2204,7 +2198,7 @@ class _POSScreenState extends State<POSScreen> {
                       "Total:",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: isTablet ? 16 : 18,
+                        fontSize: isTablet ? 14 : 16,
                         color: Colors.grey.shade800,
                       ),
                     ),
@@ -2212,13 +2206,13 @@ class _POSScreenState extends State<POSScreen> {
                       "₱${total.toStringAsFixed(2)}",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: isTablet ? 18 : 20,
+                        fontSize: isTablet ? 16 : 18,
                         color: Colors.green.shade700,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -2226,7 +2220,7 @@ class _POSScreenState extends State<POSScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: cart.isEmpty ? Colors.grey.shade300 : Colors.yellow.shade700,
                       foregroundColor: cart.isEmpty ? Colors.grey.shade600 : Colors.black87,
-                      padding: EdgeInsets.symmetric(vertical: isTablet ? 12 : 16),
+                      padding: EdgeInsets.symmetric(vertical: isTablet ? 10 : 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                         side: BorderSide(
@@ -2237,18 +2231,19 @@ class _POSScreenState extends State<POSScreen> {
                       elevation: cart.isEmpty ? 0 : 2,
                     ),
                     child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
                           Icons.payment,
-                          size: isTablet ? 18 : 20,
+                          size: isTablet ? 16 : 18,
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         Text(
                           "Checkout",
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: isTablet ? 14 : 16,
+                            fontSize: isTablet ? 13 : 14,
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -2274,10 +2269,12 @@ class _POSScreenState extends State<POSScreen> {
         return StatefulBuilder(
           builder: (context, setState) {
             return Dialog(
-              insetPadding: const EdgeInsets.all(40),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
               child: Container(
-                width: MediaQuery.of(context).size.width * 0.7,
-                height: MediaQuery.of(context).size.height * 0.6,
+                width: 450,
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.85,
+                ),
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: Colors.white,
@@ -2292,17 +2289,18 @@ class _POSScreenState extends State<POSScreen> {
                   ],
                 ),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Header
                     Row(
                       children: [
-                        Icon(Icons.receipt_long, size: 32, color: Colors.yellow.shade700),
-                        const SizedBox(width: 12),
+                        Icon(Icons.receipt_long, size: 28, color: Colors.yellow.shade700),
+                        const SizedBox(width: 8),
                         Text(
                           "Order Summary",
                           style: TextStyle(
-                            fontSize: 24,
+                            fontSize: 20,
                             fontWeight: FontWeight.bold,
                             color: Colors.grey.shade800,
                           ),
@@ -2310,7 +2308,7 @@ class _POSScreenState extends State<POSScreen> {
                         const Spacer(),
                         IconButton(
                           onPressed: () => Navigator.pop(context),
-                          icon: const Icon(Icons.close, size: 28),
+                          icon: const Icon(Icons.close, size: 24),
                           style: IconButton.styleFrom(
                             backgroundColor: Colors.grey.shade100,
                             foregroundColor: Colors.grey.shade700,
@@ -2318,112 +2316,118 @@ class _POSScreenState extends State<POSScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    // Scrollable Order Details Section
-                    Expanded(
-                      child: SingleChildScrollView(
+                    const SizedBox(height: 12),
+                    Divider(thickness: 1, color: Colors.grey.shade300),
+                    const SizedBox(height: 12),
+                    // Customer Information Section
+                    if (nameController.text.trim().isNotEmpty || plateController.text.trim().isNotEmpty) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.yellow.shade50, Colors.yellow.shade100],
+                          ),
+                          border: Border.all(color: Colors.black87, width: 1.5),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Customer Information Section
-                            if (nameController.text.trim().isNotEmpty || plateController.text.trim().isNotEmpty) ...[
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [Colors.yellow.shade50, Colors.yellow.shade100],
+                            Row(
+                              children: [
+                                Icon(Icons.person, color: Colors.black87, size: 18),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  "Customer Information",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    color: Colors.black87,
                                   ),
-                                  border: Border.all(color: Colors.black87, width: 1.5),
-                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Icon(Icons.person, color: Colors.black87, size: 20),
-                                        const SizedBox(width: 8),
-                                        const Text(
-                                          "Customer Information",
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                            color: Colors.black87,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    if (nameController.text.trim().isNotEmpty)
-                                      Text(
-                                        "Name: ${nameController.text.trim()}",
-                                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87),
-                                      ),
-                                    if (plateController.text.trim().isNotEmpty)
-                                      Text(
-                                        "Plate: ${plateController.text.trim().toUpperCase()}",
-                                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                            ],
-                            // Services Section
-                            Text(
-                              "Services:",
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: Colors.grey.shade700,
-                              ),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                            ...cart.map((item) {
-                              final price = (item["price"] as num).toDouble();
-                              final qty = (item["quantity"] ?? 0) as int;
-                              final subtotal = price * qty;
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade50,
-                                  border: Border.all(color: Colors.grey.shade200),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      "${item["code"]} - ${item["category"]}",
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      "₱${price.toStringAsFixed(2)} x $qty = ₱${subtotal.toStringAsFixed(2)}",
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.grey.shade600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }),
+                            const SizedBox(height: 6),
+                            if (nameController.text.trim().isNotEmpty)
+                              Text(
+                                "Name: ${nameController.text.trim()}",
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
+                              ),
+                            if (plateController.text.trim().isNotEmpty)
+                              Text(
+                                "Plate: ${plateController.text.trim().toUpperCase()}",
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
+                              ),
                           ],
                         ),
                       ),
+                      const SizedBox(height: 12),
+                    ],
+                    // Services Section
+                    Text(
+                      "Services:",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: Colors.grey.shade700,
+                      ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 8),
+                    ...cart.map((item) {
+                      final price = (item["price"] as num).toDouble();
+                      final qty = (item["quantity"] ?? 0) as int;
+                      final subtotal = price * qty;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          border: Border.all(color: Colors.grey.shade200),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "${item["code"]} - ${item["category"]}",
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    "₱${price.toStringAsFixed(2)} x $qty",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              "₱${subtotal.toStringAsFixed(2)}",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 12),
                     Divider(thickness: 2, color: Colors.black87),
                     const SizedBox(height: 8),
                     // Fixed Payment Section (Always Visible)
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           colors: [Colors.yellow.shade100, Colors.yellow.shade50],
@@ -2438,7 +2442,7 @@ class _POSScreenState extends State<POSScreen> {
                             "Total:",
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: 20,
+                              fontSize: 16,
                               color: Colors.black87,
                             ),
                           ),
@@ -2446,30 +2450,30 @@ class _POSScreenState extends State<POSScreen> {
                             "₱${total.toStringAsFixed(2)}",
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: 22,
+                              fontSize: 18,
                               color: Colors.yellow.shade800,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: cashController,
                       autofocus: true,
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
                       decoration: InputDecoration(
                         labelText: "Cash Amount",
-                        labelStyle: const TextStyle(fontSize: 15),
+                        labelStyle: const TextStyle(fontSize: 13),
                         border: const OutlineInputBorder(),
                         focusedBorder: OutlineInputBorder(
                           borderSide: BorderSide(color: Colors.yellow.shade700, width: 2),
                         ),
-                        prefixIcon: Icon(Icons.payments, color: Colors.green.shade600),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                        prefixIcon: Icon(Icons.payments, color: Colors.green.shade600, size: 20),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       ),
                       onChanged: (val) {
                         final cash = double.tryParse(val) ?? 0;
@@ -2478,9 +2482,9 @@ class _POSScreenState extends State<POSScreen> {
                         });
                       },
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: change >= 0 ? Colors.yellow.shade50 : Colors.red.shade50,
                         border: Border.all(
@@ -2495,7 +2499,7 @@ class _POSScreenState extends State<POSScreen> {
                           const Text(
                             "Change:",
                             style: TextStyle(
-                              fontSize: 18,
+                              fontSize: 14,
                               fontWeight: FontWeight.w600,
                               color: Colors.black87,
                             ),
@@ -2504,14 +2508,14 @@ class _POSScreenState extends State<POSScreen> {
                             "₱${change.toStringAsFixed(2)}",
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: 20,
+                              fontSize: 16,
                               color: change >= 0 ? Colors.yellow.shade800 : Colors.red.shade700,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
             // Footer with buttons
             Row(
               children: [
@@ -2519,7 +2523,7 @@ class _POSScreenState extends State<POSScreen> {
                   child: OutlinedButton(
                     onPressed: () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       side: BorderSide(color: Colors.grey.shade600, width: 1.5),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -2527,11 +2531,11 @@ class _POSScreenState extends State<POSScreen> {
                     ),
                     child: const Text(
                       "Cancel",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
                 Expanded(
                   flex: 2,
                   child: ElevatedButton(
@@ -2573,7 +2577,7 @@ class _POSScreenState extends State<POSScreen> {
                       foregroundColor: (cashController.text.trim().isEmpty || change < 0)
                           ? Colors.grey.shade600
                           : Colors.black87,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                         side: BorderSide(
@@ -2588,11 +2592,11 @@ class _POSScreenState extends State<POSScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.payment, size: 24),
-                        const SizedBox(width: 8),
+                        const Icon(Icons.payment, size: 20),
+                        const SizedBox(width: 6),
                         const Text(
-                          "Proceed to Payment",
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          "Proceed",
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -2829,7 +2833,7 @@ class _POSScreenState extends State<POSScreen> {
   int _getCustomerFormFlex() {
     // If searching and have results or in search mode, give more space to customer form
     if ((isSearching || searchResults.isNotEmpty || _hasSearched) && !_showNewCustomerForm) {
-      return 4; // Expanded for search results
+      return 3; // Expanded for search results
     }
     return 2; // Normal size
   }
@@ -2840,7 +2844,7 @@ class _POSScreenState extends State<POSScreen> {
     if ((isSearching || searchResults.isNotEmpty || _hasSearched) && !_showNewCustomerForm) {
       return 1; // Smaller during search
     }
-    return 3; // Normal size
+    return 2; // Normal size (reduced from 3)
   }
 
   // Calculate max height for search results based on available space

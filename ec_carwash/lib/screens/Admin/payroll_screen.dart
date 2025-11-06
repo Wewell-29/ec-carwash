@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:ec_carwash/data_models/expense_data.dart';
 
 class PayrollScreen extends StatefulWidget {
   const PayrollScreen({super.key});
@@ -41,6 +42,10 @@ class _PayrollScreenState extends State<PayrollScreen> {
       DateTime disbursementEndDate = DateTime.now();
       DateTime disbursementDate = DateTime.now();
       String selectedPeriodType = 'single'; // 'custom' or 'single'
+      double periodAmount = 0.0;
+      int periodJobCount = 0;
+      bool isCalculating = false;
+      bool hasCalculatedInitially = false;
 
       final result = await showDialog<Map<String, dynamic>>(
         context: context,
@@ -57,6 +62,77 @@ class _PayrollScreenState extends State<PayrollScreen> {
                 }
                 return '${DateFormat('MMM dd, yyyy').format(disbursementStartDate)} - ${DateFormat('MMM dd, yyyy').format(disbursementEndDate)}';
               }
+            }
+
+            // Function to calculate amount for selected period
+            Future<void> calculatePeriodAmount() async {
+              setDialogState(() => isCalculating = true);
+
+              try {
+                debugPrint('📊 Calculating period amount for $teamName');
+                debugPrint('   Period: ${disbursementStartDate.toString()} to ${disbursementEndDate.toString()}');
+
+                final bookingsSnapshot = await FirebaseFirestore.instance
+                    .collection('Bookings')
+                    .where('status', isEqualTo: 'completed')
+                    .where('assignedTeam', isEqualTo: teamName)
+                    .get();
+
+                debugPrint('   Total completed bookings for team: ${bookingsSnapshot.docs.length}');
+
+                final bookingsInPeriod = bookingsSnapshot.docs.where((doc) {
+                  final data = doc.data();
+                  // Use completedAt if available, fall back to updatedAt
+                  final completedAt = (data['completedAt'] as Timestamp?)?.toDate() ??
+                                     (data['updatedAt'] as Timestamp?)?.toDate();
+                  final alreadyPaid = data['salaryDisbursed'] as bool? ?? false;
+
+                  if (completedAt == null || alreadyPaid) {
+                    if (completedAt == null) {
+                      debugPrint('   ✗ Booking ${doc.id}: No completedAt/updatedAt date');
+                    }
+                    return false;
+                  }
+
+                  final isInPeriod = completedAt.isAfter(disbursementStartDate.subtract(const Duration(seconds: 1))) &&
+                         completedAt.isBefore(disbursementEndDate.add(const Duration(seconds: 1)));
+
+                  if (isInPeriod) {
+                    debugPrint('   ✓ Booking ${doc.id}: completedAt=${completedAt.toString()}, commission=${data['teamCommission']}');
+                  }
+
+                  return isInPeriod;
+                }).toList();
+
+                double amount = 0.0;
+                for (final doc in bookingsInPeriod) {
+                  final commissionValue = (doc.data()['teamCommission'] as num?)?.toDouble() ?? 0.0;
+                  amount += commissionValue;
+                }
+
+                debugPrint('   Result: ₱${amount.toStringAsFixed(2)} from ${bookingsInPeriod.length} jobs');
+
+                setDialogState(() {
+                  periodAmount = amount;
+                  periodJobCount = bookingsInPeriod.length;
+                  isCalculating = false;
+                });
+              } catch (e) {
+                debugPrint('   ❌ Error calculating period amount: $e');
+                setDialogState(() {
+                  periodAmount = 0.0;
+                  periodJobCount = 0;
+                  isCalculating = false;
+                });
+              }
+            }
+
+            // Trigger initial calculation only once
+            if (!hasCalculatedInitially) {
+              hasCalculatedInitially = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                calculatePeriodAmount();
+              });
             }
 
             return AlertDialog(
@@ -77,8 +153,52 @@ class _PayrollScreenState extends State<PayrollScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('Team: $teamName', style: const TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 4),
-                          Text('Total Earnings: ₱${commission.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          if (isCalculating)
+                            const Row(
+                              children: [
+                                SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                                SizedBox(width: 8),
+                                Text('Calculating...', style: TextStyle(fontSize: 14)),
+                              ],
+                            )
+                          else if (hasCalculatedInitially && periodAmount > 0)
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Amount for Period: ₱${periodAmount.toStringAsFixed(2)}',
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green),
+                                ),
+                                Text(
+                                  '$periodJobCount job(s)',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                ),
+                              ],
+                            )
+                          else if (hasCalculatedInitially && periodAmount == 0)
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'No unpaid jobs in this period',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.orange),
+                                ),
+                                Text(
+                                  'Total pending: ₱${commission.toStringAsFixed(2)}',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                ),
+                              ],
+                            )
+                          else
+                            Text(
+                              'Total Pending: ₱${commission.toStringAsFixed(2)}',
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                            ),
                         ],
                       ),
                     ),
@@ -182,6 +302,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
                                     disbursementStartDate = picked;
                                     disbursementEndDate = picked;
                                   });
+                                  calculatePeriodAmount();
                                 }
                               } else {
                                 // Date range picker
@@ -215,6 +336,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
                                       23, 59, 59,
                                     );
                                   });
+                                  calculatePeriodAmount();
                                 }
                               }
                             },
@@ -304,15 +426,21 @@ class _PayrollScreenState extends State<PayrollScreen> {
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
-                  onPressed: () => Navigator.pop(context, {
-                    'confirmed': true,
-                    'disbursementStartDate': disbursementStartDate,
-                    'disbursementEndDate': disbursementEndDate,
-                    'disbursementDate': disbursementDate,
-                  }),
+                  onPressed: (hasCalculatedInitially && periodAmount == 0)
+                    ? null
+                    : () => Navigator.pop(context, {
+                        'confirmed': true,
+                        'disbursementStartDate': disbursementStartDate,
+                        'disbursementEndDate': disbursementEndDate,
+                        'disbursementDate': disbursementDate,
+                      }),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.yellow.shade700,
+                    backgroundColor: (hasCalculatedInitially && periodAmount == 0)
+                        ? Colors.grey.shade300
+                        : Colors.yellow.shade700,
                     foregroundColor: Colors.black87,
+                    disabledBackgroundColor: Colors.grey.shade300,
+                    disabledForegroundColor: Colors.grey.shade600,
                   ),
                   child: const Text('Confirm Disbursement', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
@@ -360,7 +488,9 @@ class _PayrollScreenState extends State<PayrollScreen> {
       // Filter bookings within the period and not yet disbursed
       final bookingsInPeriod = bookingsSnapshot.docs.where((doc) {
         final data = doc.data();
-        final completedAt = (data['updatedAt'] as Timestamp?)?.toDate();
+        // Use completedAt if available, fall back to updatedAt
+        final completedAt = (data['completedAt'] as Timestamp?)?.toDate() ??
+                           (data['updatedAt'] as Timestamp?)?.toDate();
         final alreadyPaid = data['salaryDisbursed'] as bool? ?? false;
 
         if (completedAt == null || alreadyPaid) return false;
@@ -414,6 +544,19 @@ class _PayrollScreenState extends State<PayrollScreen> {
         });
       }
       await batch.commit();
+
+      // Record as expense under Utilities category
+      final expense = ExpenseData(
+        date: selectedDisbursementDate,
+        category: 'Utilities',
+        description: 'Payroll - $teamName Salary',
+        amount: actualAmount,
+        vendor: teamName,
+        notes: 'Period: ${DateFormat('MMM dd, yyyy').format(selectedDisbursementStartDate)} - ${DateFormat('MMM dd, yyyy').format(selectedDisbursementEndDate)}\n${bookingsInPeriod.length} job(s) completed',
+        addedBy: 'Admin',
+        createdAt: DateTime.now(),
+      );
+      await ExpenseManager.addExpense(expense);
 
       // Reload data to update status
       await _loadPayrollData();
@@ -477,12 +620,24 @@ class _PayrollScreenState extends State<PayrollScreen> {
       // Calculate commissions for unpaid bookings only
       Map<String, double> commissions = {'Team A': 0.0, 'Team B': 0.0};
       Map<String, int> counts = {'Team A': 0, 'Team B': 0};
+      int totalCompleted = bookingsSnapshot.docs.length;
+      int paidCount = 0;
+      int unpaidCount = 0;
+
+      debugPrint('📊 Loading payroll data...');
+      debugPrint('   Total completed bookings: $totalCompleted');
 
       for (final doc in bookingsSnapshot.docs) {
         final data = doc.data();
         final team = data['assignedTeam'] as String?;
         final commission = (data['teamCommission'] as num?)?.toDouble() ?? 0.0;
         final isPaid = data['salaryDisbursed'] as bool? ?? false;
+
+        if (isPaid) {
+          paidCount++;
+        } else {
+          unpaidCount++;
+        }
 
         // Skip if no team assigned or already paid
         if (team == null || !commissions.containsKey(team) || isPaid) {
@@ -492,6 +647,12 @@ class _PayrollScreenState extends State<PayrollScreen> {
         commissions[team] = commissions[team]! + commission;
         counts[team] = counts[team]! + 1;
       }
+
+      debugPrint('   Paid bookings: $paidCount');
+      debugPrint('   Unpaid bookings: $unpaidCount');
+      debugPrint('   Team A pending: ₱${commissions['Team A']!.toStringAsFixed(2)} (${counts['Team A']} jobs)');
+      debugPrint('   Team B pending: ₱${commissions['Team B']!.toStringAsFixed(2)} (${counts['Team B']} jobs)');
+
 
       // Update disbursement status: show as disbursed only if there are no pending commissions
       Map<String, bool> finalDisbursementStatus = {
@@ -507,8 +668,8 @@ class _PayrollScreenState extends State<PayrollScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
       if (mounted) {
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading payroll data: $e')),
         );
