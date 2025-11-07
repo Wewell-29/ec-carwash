@@ -514,6 +514,70 @@ class BookingManager {
     }
   }
 
+  /// Round datetime to nearest 30-minute time slot
+  static DateTime roundToNearestTimeSlot(DateTime dateTime) {
+    final minute = dateTime.minute;
+    final roundedMinute = minute >= 30 ? 30 : 0;
+    return DateTime(
+      dateTime.year,
+      dateTime.month,
+      dateTime.day,
+      dateTime.hour,
+      roundedMinute,
+    );
+  }
+
+  /// Get count of bookings for a specific team at a specific time slot
+  /// Only counts 'approved' and 'in-progress' bookings
+  static Future<int> getTeamBookingsCountForTimeSlot({
+    required String team,
+    required DateTime timeSlot,
+  }) async {
+    try {
+      // Round to 30-min slot
+      final slot = roundToNearestTimeSlot(timeSlot);
+
+      // Query bookings for this team at this exact time
+      // Only count 'approved' and 'in-progress' status
+      final query = await _firestore
+          .collection(_collection)
+          .where('assignedTeam', isEqualTo: team)
+          .where('scheduledDateTime', isEqualTo: Timestamp.fromDate(slot))
+          .get();
+
+      // Filter by status in memory (to avoid composite index requirement)
+      final count = query.docs.where((doc) {
+        final status = doc.data()['status'] as String?;
+        return status == 'approved' || status == 'in-progress';
+      }).length;
+
+      return count;
+    } catch (e) {
+      debugPrint('Failed to get team bookings count: $e');
+      return 0;
+    }
+  }
+
+  /// Check if both teams are full at a specific time slot
+  static Future<bool> isTimeSlotFull(DateTime timeSlot) async {
+    try {
+      final teamACount = await getTeamBookingsCountForTimeSlot(
+        team: 'Team A',
+        timeSlot: timeSlot,
+      );
+
+      final teamBCount = await getTeamBookingsCountForTimeSlot(
+        team: 'Team B',
+        timeSlot: timeSlot,
+      );
+
+      return teamACount >= 2 && teamBCount >= 2;
+    } catch (e) {
+      debugPrint('Failed to check if time slot is full: $e');
+      return false;
+    }
+  }
+
   /// Get upcoming bookings
   static Future<List<Booking>> getUpcomingBookings() async {
     try {

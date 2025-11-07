@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:ec_carwash/data_models/booking_data_unified.dart';
 import 'package:ec_carwash/data_models/relationship_manager.dart';
+import 'package:ec_carwash/data_models/notification_data.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -85,6 +86,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
   }
 
   /// Auto-cancel approved/pending bookings from mobile app after 30 minutes if not paid/assigned
+  /// Also auto-cancel bookings that exceed team capacity limits
   Future<void> _autoCheckAndCancelExpiredBookings() async {
     try {
       final now = DateTime.now();
@@ -101,22 +103,45 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         final scheduledDateTime = (data['scheduledDateTime'] as Timestamp?)
             ?.toDate();
         final paymentStatus = data['paymentStatus'] ?? 'pending';
+        final assignedTeam = data['assignedTeam'] as String?;
+        final status = data['status'] as String?;
 
         if (scheduledDateTime != null) {
           final timeDifference = now.difference(scheduledDateTime);
 
-          // Auto-cancel if more than 30 minutes past scheduled time and not paid
+          // Check 1: No-show cancellation (existing logic - 30 min past scheduled)
           if (timeDifference.inMinutes >= 30 && paymentStatus != 'paid') {
-            await doc.reference.update({
-              'status': 'cancelled',
-              'cancelReason': 'Auto-cancelled: No show after 30 minutes',
-              'cancelledAt': FieldValue.serverTimestamp(),
-              'autoCancelled': true,
-            });
-
-            debugPrint(
-              'Auto-cancelled booking ${doc.id} - ${timeDifference.inMinutes} minutes past scheduled time',
+            await _autoCancelBooking(
+              doc.reference,
+              doc.id,
+              data,
+              'Auto-cancelled: No show after 30 minutes',
             );
+            continue;
+          }
+
+          // Check 2: Capacity overflow (NEW LOGIC)
+          // Only check approved bookings that have team assignments
+          if (status == 'approved' && assignedTeam != null) {
+            // Check if time slot is within business hours (8 AM - 6 PM)
+            final hour = scheduledDateTime.hour;
+            if (hour >= 8 && hour < 18) {
+              // Count bookings for this team at this time slot
+              final count = await BookingManager.getTeamBookingsCountForTimeSlot(
+                team: assignedTeam,
+                timeSlot: scheduledDateTime,
+              );
+
+              // If more than 2 bookings for this team at this time, auto-cancel
+              if (count > 2) {
+                await _autoCancelBooking(
+                  doc.reference,
+                  doc.id,
+                  data,
+                  'Not available at the requested time slot',
+                );
+              }
+            }
           }
         }
       }
@@ -127,6 +152,39 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       }
     } catch (e) {
       debugPrint('Error in auto-cancel check: $e');
+    }
+  }
+
+  /// Helper method for auto-cancellation with notification
+  Future<void> _autoCancelBooking(
+    DocumentReference docRef,
+    String bookingId,
+    Map<String, dynamic> data,
+    String reason,
+  ) async {
+    try {
+      await docRef.update({
+        'status': 'cancelled',
+        'cancelReason': reason,
+        'cancelledAt': FieldValue.serverTimestamp(),
+        'autoCancelled': true,
+      });
+
+      // Send notification to customer
+      final userEmail = data['userEmail'] as String?;
+      if (userEmail != null && userEmail.isNotEmpty) {
+        await NotificationManager.createNotification(
+          userId: userEmail,
+          title: 'Booking Cancelled',
+          message: 'Your booking has been automatically cancelled because the requested time slot is not available.',
+          type: 'booking_auto_cancelled',
+          metadata: {'bookingId': bookingId},
+        );
+      }
+
+      debugPrint('Auto-cancelled booking $bookingId - $reason');
+    } catch (e) {
+      debugPrint('Error auto-cancelling booking $bookingId: $e');
     }
   }
 
@@ -370,6 +428,29 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
           .firstOrNull;
       if (booking == null) return;
 
+      // Check capacity before approving
+      if (status == 'approved') {
+        final count = await BookingManager.getTeamBookingsCountForTimeSlot(
+          team: team,
+          timeSlot: booking.scheduledDateTime,
+        );
+
+        if (count >= 2) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Cannot assign - $team already has 2 bookings at this time slot',
+                ),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+          return;
+        }
+      }
+
       // Update booking status with team assignment
       await FirebaseFirestore.instance
           .collection('Bookings')
@@ -381,7 +462,9 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
             'updatedAt': FieldValue.serverTimestamp(),
           });
 
+      await BookingManager.updateBookingStatus(bookingId, status);
       await _loadBookings(); // Refresh the list
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -430,8 +513,9 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
             .doc(bookingId)
             .update({'teamCommission': commission});
 
-        // Only create transaction if this is NOT a POS booking (POS already created one)
-        if (booking.source != 'pos') {
+        // Only create transaction if it doesn't already exist
+        // Transaction is now created when marking as paid, not at completion
+        if (booking.source != 'pos' && booking.transactionId == null) {
           await _createTransactionFromBooking(booking);
         }
       }
@@ -439,9 +523,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       await _loadBookings(); // Refresh the list
       if (mounted) {
         String message = 'Booking status updated to $status';
-        if (status == 'completed') {
-          message += ' and transaction record created';
-        }
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(message)));
@@ -508,12 +589,15 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
             'updatedAt': FieldValue.serverTimestamp(),
           });
 
+      // Create transaction immediately when paid
+      await _createTransactionFromBooking(booking);
+
       await _loadBookings();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Booking marked as paid'),
+            content: Text('Booking marked as paid and transaction created'),
             backgroundColor: Colors.green,
           ),
         );
@@ -550,106 +634,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       }
     } catch (e) {
       throw Exception('Failed to create transaction from booking: $e');
-    }
-  }
-
-  Future<void> _showRescheduleDialog(Booking booking) async {
-    DateTime? selectedDate = booking.scheduledDateTime;
-    TimeOfDay? selectedTime = TimeOfDay.fromDateTime(booking.scheduledDateTime);
-
-    await showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Reschedule Booking'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Customer: ${booking.userName}'),
-              Text('Plate: ${booking.plateNumber}'),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () async {
-                  final date = await showDatePicker(
-                    context: context,
-                    initialDate: selectedDate ?? DateTime.now(),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                  );
-                  if (date != null) {
-                    setDialogState(() => selectedDate = date);
-                  }
-                },
-                child: Text(
-                  selectedDate != null
-                      ? DateFormat('MMM dd, yyyy').format(selectedDate!)
-                      : 'Select Date',
-                ),
-              ),
-              const SizedBox(height: 8),
-              ElevatedButton(
-                onPressed: () async {
-                  final time = await showTimePicker(
-                    context: context,
-                    initialTime: selectedTime ?? TimeOfDay.now(),
-                  );
-                  if (time != null) {
-                    setDialogState(() => selectedTime = time);
-                  }
-                },
-                child: Text(
-                  selectedTime != null
-                      ? selectedTime!.format(context)
-                      : 'Select Time',
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: selectedDate != null && selectedTime != null
-                  ? () async {
-                      final newDateTime = DateTime(
-                        selectedDate!.year,
-                        selectedDate!.month,
-                        selectedDate!.day,
-                        selectedTime!.hour,
-                        selectedTime!.minute,
-                      );
-                      Navigator.pop(context);
-                      await _rescheduleBooking(booking.id!, newDateTime);
-                    }
-                  : null,
-              child: const Text('Reschedule'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _rescheduleBooking(
-    String bookingId,
-    DateTime newDateTime,
-  ) async {
-    try {
-      await BookingManager.rescheduleBooking(bookingId, newDateTime);
-      await _loadBookings(); // Refresh the list
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Booking rescheduled successfully')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error rescheduling booking: $e')),
-        );
-      }
     }
   }
 
@@ -842,8 +826,9 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                     padding: const EdgeInsets.all(8),
                     itemCount: bookings.length,
                     itemBuilder: (context, index) {
-                      if (index >= bookings.length)
+                      if (index >= bookings.length) {
                         return const SizedBox.shrink();
+                      }
                       final booking = bookings[index];
                       return _buildKanbanCard(booking);
                     },
@@ -1165,20 +1150,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                   child: const Text('Reject'),
                 ),
               ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: TextButton(
-                  onPressed: booking.id != null
-                      ? () => _showRescheduleDialog(booking)
-                      : null,
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.orange,
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    textStyle: const TextStyle(fontSize: 11),
-                  ),
-                  child: const Text('Reschedule'),
-                ),
-              ),
             ],
           ),
         ],
@@ -1232,20 +1203,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
             ),
             const SizedBox(height: 4),
           ],
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: booking.id != null
-                  ? () => _showRescheduleDialog(booking)
-                  : null,
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.orange,
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                textStyle: const TextStyle(fontSize: 11),
-              ),
-              child: const Text('Reschedule'),
-            ),
-          ),
         ],
       );
     } else if (booking.status == 'completed') {
