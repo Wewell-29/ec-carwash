@@ -178,6 +178,68 @@ class ResponsiveHelper {
     if (isTablet) return tablet ?? mobile;
     return desktop ?? tablet ?? mobile;
   }
+
+  // Dashboard-specific helpers
+
+  /// Get sidebar width (0 for drawer, 72 for rail, 280 for full)
+  double get sidebarWidth {
+    if (width < desktopBreakpoint) return 0; // Use drawer
+    if (width < largeDesktopBreakpoint) return 72; // Navigation rail
+    return 280; // Full sidebar
+  }
+
+  /// Check if should use navigation rail
+  bool get useNavigationRail {
+    return width >= desktopBreakpoint && width < largeDesktopBreakpoint;
+  }
+
+  /// Check if should use full sidebar
+  bool get useFullSidebar {
+    return width >= largeDesktopBreakpoint;
+  }
+
+  /// Get number of KPI card columns
+  int get kpiCardColumns {
+    if (isMobile) return 1;
+    if (width < tabletBreakpoint) return 2;
+    return 3;
+  }
+
+  /// Get number of activity card columns
+  int get activityCardColumns {
+    if (isMobile) return 1;
+    if (width < tabletBreakpoint) return 1;
+    if (width < desktopBreakpoint) return 2;
+    return 3;
+  }
+
+  /// Get KPI card aspect ratio
+  double get kpiCardAspectRatio {
+    if (isMobile) return 2.5;
+    if (width < tabletBreakpoint) return 2.2;
+    return 2.0;
+  }
+
+  /// Get dashboard padding
+  EdgeInsets get dashboardPadding {
+    if (isMobile) return const EdgeInsets.all(12);
+    if (isTablet) return const EdgeInsets.all(16);
+    return const EdgeInsets.all(20);
+  }
+
+  /// Get card spacing
+  double get cardSpacing {
+    if (isMobile) return 12;
+    if (isTablet) return 16;
+    return 16;
+  }
+
+  /// Get section spacing
+  double get sectionSpacing {
+    if (isMobile) return 16;
+    if (isTablet) return 20;
+    return 24;
+  }
 }
 
 /// Extension for easy access

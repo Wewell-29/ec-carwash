@@ -3,6 +3,7 @@ import 'package:ec_carwash/data_models/inventory_data.dart';
 import 'package:ec_carwash/data_models/expense_data.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:ec_carwash/utils/responsive_helper.dart';
 import 'pos_screen.dart';
 import 'inventory_screen.dart';
 import 'expenses_screen.dart';
@@ -29,7 +30,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
   double _todayRevenue = 0.0;
   double _totalRevenue = 0.0;
   double _todayExpenses = 0.0;
-  double _todayPayrollCommission = 0.0; // Add payroll commission tracking
+  double _todayPayrollCommission = 0.0;
   int _pendingBookings = 0;
   List<Map<String, dynamic>> _recentTransactions = [];
   List<Map<String, dynamic>> _approvedBookingsList = [];
@@ -50,7 +51,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         });
       }
     } catch (e) {
-      // Handle error silently for now
+      return;
     }
   }
 
@@ -62,7 +63,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       final startOfDay = DateTime(today.year, today.month, today.day);
       final endOfDay = DateTime(today.year, today.month, today.day, 23, 59, 59);
 
-      // Load ALL today's transactions for accurate revenue and commission
       final allTodayTransactionsSnapshot = await FirebaseFirestore.instance
           .collection('Transactions')
           .where('transactionAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
@@ -80,9 +80,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         todayRev += (data['total'] as num?)?.toDouble() ?? 0.0;
         todayCommission += (data['teamCommission'] as num?)?.toDouble() ?? 0.0;
 
-        // Only add first 5 to recent transactions list for display
         if (i < 5) {
-          // Get customer name from customer object (unified structure)
           final customerData = data['customer'] as Map<String, dynamic>?;
           final customerName = customerData?['name'] ?? 'Walk-in';
 
@@ -95,7 +93,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         }
       }
 
-      // Load all-time revenue
       final allTransactionsSnapshot = await FirebaseFirestore.instance
           .collection('Transactions')
           .get();
@@ -106,7 +103,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         totalRev += (data['total'] as num?)?.toDouble() ?? 0.0;
       }
 
-      // Load today's expenses
       final expensesSnapshot = await ExpenseManager.getExpenses(
         startDate: startOfDay,
         endDate: endOfDay,
@@ -114,7 +110,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
 
       double todayExp = expensesSnapshot.fold(0.0, (total, expense) => total + expense.amount);
 
-      // Load pending bookings from mobile app (today only for notification badge)
       final pendingBookingsSnapshot = await FirebaseFirestore.instance
           .collection('Bookings')
           .where('status', isEqualTo: 'pending')
@@ -127,7 +122,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                              (data['selectedDateTime'] as Timestamp?)?.toDate() ??
                              (data['scheduledDate'] as Timestamp?)?.toDate();
 
-        // Only include today's pending bookings for notification badge
         if (scheduledDate != null &&
             scheduledDate.year == today.year &&
             scheduledDate.month == today.month &&
@@ -145,7 +139,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         }
       }
 
-      // Load approved bookings for today only (for pending services card)
       final approvedBookingsSnapshot = await FirebaseFirestore.instance
           .collection('Bookings')
           .where('status', isEqualTo: 'approved')
@@ -158,7 +151,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                              (data['selectedDateTime'] as Timestamp?)?.toDate() ??
                              (data['scheduledDate'] as Timestamp?)?.toDate();
 
-        // Only include today's bookings
         if (scheduledDate != null &&
             scheduledDate.year == today.year &&
             scheduledDate.month == today.month &&
@@ -176,12 +168,10 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         }
       }
 
-      // Limit to 5 results
       if (approvedBookings.length > 5) {
         approvedBookings = approvedBookings.sublist(0, 5);
       }
 
-      // Sort both by scheduledDate
       pendingBookings.sort((a, b) {
         final dateA = a['scheduledDate'] as DateTime?;
         final dateB = b['scheduledDate'] as DateTime?;
@@ -238,7 +228,8 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
   @override
   Widget build(BuildContext context) {
     final menuItems = getMenuItems();
-    final isDesktop = MediaQuery.of(context).size.width > 800;
+    final responsive = context.responsive;
+    final isDesktop = responsive.isDesktop;
 
     return Scaffold(
       backgroundColor: Colors.grey.shade900,
@@ -285,7 +276,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
               style: TextStyle(
                 fontFamily: 'Roboto',
                 fontWeight: FontWeight.w700,
-                fontSize: isDesktop ? 26 : 22,
+                fontSize: responsive.fontSize(mobile: 20, tablet: 22, desktop: 26),
                 color: Colors.yellow[700],
                 letterSpacing: 0.5,
               ),
@@ -306,16 +297,14 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       body: isDesktop
           ? Stack(
               children: [
-                // Sidebar that extends full height
                 Positioned(
                   left: 0,
                   top: 0,
                   bottom: 0,
-                  child: _buildSideNav(menuItems),
+                  child: _buildSideNav(menuItems, responsive),
                 ),
-                // Main content with left margin
                 Positioned(
-                  left: 280,
+                  left: responsive.sidebarWidth,
                   top: 0,
                   right: 0,
                   bottom: 0,
@@ -330,7 +319,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
               color: Colors.white,
               child: _buildPage(menuItems[_selectedIndex]),
             ),
-      floatingActionButton: _selectedIndex == 3 // Inventory
+      floatingActionButton: _selectedIndex == 3
           ? FloatingActionButton.extended(
               onPressed: () => _showAddItemDialog(),
               backgroundColor: Colors.yellow.shade700,
@@ -338,9 +327,9 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
               icon: const Icon(Icons.add),
               label: const Text("Add Item", style: TextStyle(fontWeight: FontWeight.w600)),
             )
-          : _selectedIndex == 4 // Expenses
-              ? null // FAB is in ExpensesScreen itself
-              : _selectedIndex == 5 // Services
+          : _selectedIndex == 4
+              ? null
+              : _selectedIndex == 5
                   ? FloatingActionButton.extended(
                       onPressed: () => _showAddServiceDialog(),
                       backgroundColor: Colors.yellow.shade700,
@@ -352,7 +341,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
     );
   }
 
-  /// Drawer (Mobile)
   Widget _buildDrawer(List<String> menuItems) {
     final iconMap = {
       "Dashboard": Icons.dashboard_outlined,
@@ -536,8 +524,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
     );
   }
 
-  /// Side Nav (Desktop/Web)
-  Widget _buildSideNav(List<String> menuItems) {
+  Widget _buildSideNav(List<String> menuItems, ResponsiveHelper responsive) {
     final iconMap = {
       "Dashboard": Icons.dashboard_outlined,
       "POS": Icons.point_of_sale_outlined,
@@ -562,8 +549,10 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       "Analytics": Icons.show_chart,
     };
 
+    final isCompact = responsive.useNavigationRail;
+
     return Container(
-      width: 280,
+      width: responsive.sidebarWidth,
       height: double.infinity,
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -599,34 +588,49 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         children: [
           const SizedBox(height: 20),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.yellow.shade700,
-                    borderRadius: BorderRadius.circular(8),
+            padding: EdgeInsets.symmetric(horizontal: isCompact ? 12 : 20),
+            child: isCompact
+                ? Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.yellow.shade700,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.local_car_wash,
+                        color: Colors.black,
+                        size: 24,
+                      ),
+                    ),
+                  )
+                : Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.yellow.shade700,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.local_car_wash,
+                          color: Colors.black,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        "EC Carwash",
+                        style: TextStyle(
+                          fontFamily: 'Roboto',
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.yellow.shade700,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
                   ),
-                  child: const Icon(
-                    Icons.local_car_wash,
-                    color: Colors.black,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  "EC Carwash",
-                  style: TextStyle(
-                    fontFamily: 'Roboto',
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.yellow.shade700,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
           ),
           const SizedBox(height: 32),
           Expanded(
@@ -650,8 +654,8 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                         }
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: isCompact ? 8 : 16,
                           vertical: 12,
                         ),
                         decoration: BoxDecoration(
@@ -660,76 +664,109 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Row(
-                          children: [
-                            Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Icon(
-                                  isSelected
-                                      ? selectedIconMap[title] ?? Icons.circle
-                                      : iconMap[title] ?? Icons.circle_outlined,
-                                  color: isSelected
-                                      ? Colors.black
-                                      : Colors.grey.shade400,
-                                  size: 22,
+                        child: isCompact
+                            ? Center(
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Icon(
+                                      isSelected
+                                          ? selectedIconMap[title] ?? Icons.circle
+                                          : iconMap[title] ?? Icons.circle_outlined,
+                                      color: isSelected
+                                          ? Colors.black
+                                          : Colors.grey.shade400,
+                                      size: 22,
+                                    ),
+                                    if (title == "Scheduling" && _pendingBookings > 0)
+                                      Positioned(
+                                        right: -2,
+                                        top: -2,
+                                        child: Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: BoxDecoration(
+                                            color: Colors.red,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: Colors.white,
+                                              width: 1.5,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
-                                // Red dot indicator for pending bookings on Scheduling
-                                if (title == "Scheduling" && _pendingBookings > 0)
-                                  Positioned(
-                                    right: -2,
-                                    top: -2,
-                                    child: Container(
-                                      width: 10,
-                                      height: 10,
+                              )
+                            : // Full mode - icon + text
+                            Row(
+                                children: [
+                                  Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Icon(
+                                        isSelected
+                                            ? selectedIconMap[title] ?? Icons.circle
+                                            : iconMap[title] ?? Icons.circle_outlined,
+                                        color: isSelected
+                                            ? Colors.black
+                                            : Colors.grey.shade400,
+                                        size: 22,
+                                      ),
+                                      if (title == "Scheduling" && _pendingBookings > 0)
+                                        Positioned(
+                                          right: -2,
+                                          top: -2,
+                                          child: Container(
+                                            width: 10,
+                                            height: 10,
+                                            decoration: BoxDecoration(
+                                              color: Colors.red,
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: Colors.white,
+                                                width: 1.5,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    title,
+                                    style: TextStyle(
+                                      fontFamily: 'Roboto',
+                                      color: isSelected
+                                          ? Colors.black
+                                          : Colors.grey.shade300,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                      fontSize: 15,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                  if (title == "Scheduling" && _pendingBookings > 0) ...[
+                                    const Spacer(),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: Colors.red,
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        _pendingBookings.toString(),
+                                        style: const TextStyle(
                                           color: Colors.white,
-                                          width: 1.5,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
                                         ),
                                       ),
                                     ),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              title,
-                              style: TextStyle(
-                                fontFamily: 'Roboto',
-                                color: isSelected
-                                    ? Colors.black
-                                    : Colors.grey.shade300,
-                                fontWeight: isSelected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                fontSize: 15,
-                                letterSpacing: 0.2,
+                                  ],
+                                ],
                               ),
-                            ),
-                            // Badge with count for pending bookings
-                            if (title == "Scheduling" && _pendingBookings > 0) ...[
-                              const Spacer(),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.red,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  _pendingBookings.toString(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
                       ),
                     ),
                   ),
@@ -742,7 +779,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
     );
   }
 
-  /// Page Content Switch
   Widget _buildPage(String menu) {
     switch (menu) {
       case "Dashboard":
@@ -758,7 +794,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
       case "Services":
         return ServicesScreen(
           onShowAddDialog: (callback) {
-            // Store the callback so FAB can use it
             _showAddServiceDialogCallback = callback;
           },
         );
@@ -779,7 +814,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
   }
 
   void _showAddItemDialog() async {
-    // Load existing items to check for duplicates
     final existingItems = await InventoryManager.getItems();
     final existingNames = existingItems.map((item) => item.name.toLowerCase()).toSet();
 
@@ -990,134 +1024,86 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
 
   void _showAddServiceDialog() {
     if (_selectedIndex != 5) {
-      // Navigate to Services tab first
       setState(() => _selectedIndex = 5);
 
-      // Give time for screen to build and register callback
       Future.delayed(const Duration(milliseconds: 500), () {
         if (_showAddServiceDialogCallback != null) {
           _showAddServiceDialogCallback!();
         }
       });
     } else {
-      // Already on Services tab, call immediately
       if (_showAddServiceDialogCallback != null) {
         _showAddServiceDialogCallback!();
       }
     }
   }
 
-  /// World-Class Professional Dashboard with Yellow/Black Theme
   Widget _buildDashboard() {
     if (_isDashboardLoading) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Net Profit Card at Top
-          _buildNetProfitCard(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final responsive = context.responsive;
 
-          const SizedBox(height: 20),
-
-          // KPI Cards - 3 cards in a row
-          Row(
+        return SingleChildScrollView(
+          padding: responsive.dashboardPadding,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: _buildKPICard(
-                  title: 'Total Revenue',
-                  value: '₱${_totalRevenue.toStringAsFixed(2)}',
-                  icon: Icons.account_balance_wallet,
-                  subtitle: 'All time',
-                ),
+              _buildNetProfitCard(responsive),
+
+              SizedBox(height: responsive.sectionSpacing),
+
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: responsive.kpiCardColumns,
+                childAspectRatio: responsive.kpiCardAspectRatio,
+                crossAxisSpacing: responsive.cardSpacing,
+                mainAxisSpacing: responsive.cardSpacing,
+                children: [
+                  _buildKPICard(
+                    title: 'Total Revenue',
+                    value: '₱${_totalRevenue.toStringAsFixed(2)}',
+                    icon: Icons.account_balance_wallet,
+                    subtitle: 'All time',
+                    responsive: responsive,
+                  ),
+                  _buildKPICard(
+                    title: "Today's Expenses",
+                    value: '₱${_todayExpenses.toStringAsFixed(2)}',
+                    icon: Icons.money_off,
+                    subtitle: 'Operating costs',
+                    responsive: responsive,
+                  ),
+                  _buildKPICard(
+                    title: 'Pending Bookings',
+                    value: '$_pendingBookings',
+                    icon: Icons.schedule,
+                    subtitle: 'Awaiting service',
+                    responsive: responsive,
+                  ),
+                ],
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildKPICard(
-                  title: "Today's Expenses",
-                  value: '₱${_todayExpenses.toStringAsFixed(2)}',
-                  icon: Icons.money_off,
-                  subtitle: 'Operating costs',
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildKPICard(
-                  title: 'Pending Bookings',
-                  value: '$_pendingBookings',
-                  icon: Icons.schedule,
-                  subtitle: 'Awaiting service',
-                ),
-              ),
+
+              SizedBox(height: responsive.sectionSpacing),
+
+              _buildActivityCardsSection(responsive),
             ],
           ),
-
-          const SizedBox(height: 24),
-
-          // Recent Activity Section - Responsive width cards
-          LayoutBuilder(
-            builder: (context, constraints) {
-              // Calculate card width based on available space
-              // Use 3 cards if wide enough, otherwise scroll
-              final isWide = constraints.maxWidth > 1400;
-              final cardWidth = isWide
-                  ? (constraints.maxWidth - 64) / 3  // 3 cards with spacing
-                  : constraints.maxWidth * 0.85;      // Single card width when narrow
-
-              return SizedBox(
-                height: 500,
-                child: isWide
-                    ? Row(
-                        children: [
-                          Expanded(child: _buildRecentTransactionsCard()),
-                          const SizedBox(width: 16),
-                          Expanded(child: _buildPendingServicesCard()),
-                          const SizedBox(width: 16),
-                          Expanded(child: _buildLowStockCard()),
-                        ],
-                      )
-                    : SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: cardWidth,
-                              height: 500,
-                              child: _buildRecentTransactionsCard(),
-                            ),
-                            const SizedBox(width: 16),
-                            SizedBox(
-                              width: cardWidth,
-                              height: 500,
-                              child: _buildPendingServicesCard(),
-                            ),
-                            const SizedBox(width: 16),
-                            SizedBox(
-                              width: cardWidth,
-                              height: 500,
-                              child: _buildLowStockCard(),
-                            ),
-                          ],
-                        ),
-                      ),
-              );
-            },
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  /// KPI Card - Yellow/Black Theme
   Widget _buildKPICard({
     required String title,
     required String value,
     required IconData icon,
     required String subtitle,
+    required ResponsiveHelper responsive,
   }) {
     return Card(
       color: Colors.yellow.shade50,
@@ -1126,59 +1112,150 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         borderRadius: BorderRadius.circular(12),
         side: const BorderSide(color: Colors.black87, width: 1.5),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.yellow.shade700,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.black87, width: 1),
+      clipBehavior: Clip.hardEdge,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight,
+              ),
+              child: IntrinsicHeight(
+                child: Padding(
+                  padding: responsive.responsiveValue(
+                    mobile: const EdgeInsets.all(10),
+                    tablet: const EdgeInsets.all(12),
+                    desktop: const EdgeInsets.all(16),
                   ),
-                  child: Icon(icon, color: Colors.black87, size: 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: EdgeInsets.all(responsive.isMobile ? 6 : 8),
+                            decoration: BoxDecoration(
+                              color: Colors.yellow.shade700,
+                              borderRadius: BorderRadius.circular(responsive.borderRadius),
+                              border: Border.all(color: Colors.black87, width: 1),
+                            ),
+                            child: Icon(
+                              icon,
+                              color: Colors.black87,
+                              size: responsive.isMobile ? 18 : 20,
+                            ),
+                          ),
+                          const Spacer(),
+                        ],
+                      ),
+                      SizedBox(height: responsive.isMobile ? 8 : 12),
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            value,
+                            style: TextStyle(
+                              fontSize: responsive.fontSize(mobile: 18, tablet: 20, desktop: 24),
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: responsive.fontSize(mobile: 11, tablet: 12, desktop: 13),
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black.withValues(alpha: 0.7),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: responsive.fontSize(mobile: 10, tablet: 10, desktop: 11),
+                          color: Colors.black.withValues(alpha: 0.5),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
-                const Spacer(),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.black.withValues(alpha: 0.7),
-              ),
-            ),
-            Text(
-              subtitle,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.black.withValues(alpha: 0.5),
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
 
-  /// Net Profit Card
-  Widget _buildNetProfitCard() {
+  Widget _buildActivityCardsSection(ResponsiveHelper responsive) {
+    if (responsive.activityCardColumns == 1) {
+      return Column(
+        children: [
+          SizedBox(
+            height: 500,
+            child: _buildRecentTransactionsCard(responsive),
+          ),
+          SizedBox(height: responsive.cardSpacing),
+          SizedBox(
+            height: 500,
+            child: _buildPendingServicesCard(responsive),
+          ),
+          SizedBox(height: responsive.cardSpacing),
+          SizedBox(
+            height: 500,
+            child: _buildLowStockCard(responsive),
+          ),
+        ],
+      );
+    }
+
+    if (responsive.activityCardColumns == 2) {
+      return Column(
+        children: [
+          SizedBox(
+            height: 500,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: _buildRecentTransactionsCard(responsive)),
+                SizedBox(width: responsive.cardSpacing),
+                Expanded(child: _buildPendingServicesCard(responsive)),
+              ],
+            ),
+          ),
+          SizedBox(height: responsive.cardSpacing),
+          SizedBox(
+            height: 500,
+            child: _buildLowStockCard(responsive),
+          ),
+        ],
+      );
+    }
+
+    return SizedBox(
+      height: 500,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: _buildRecentTransactionsCard(responsive)),
+          SizedBox(width: responsive.cardSpacing),
+          Expanded(child: _buildPendingServicesCard(responsive)),
+          SizedBox(width: responsive.cardSpacing),
+          Expanded(child: _buildLowStockCard(responsive)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNetProfitCard(ResponsiveHelper responsive) {
     final netProfit = _todayRevenue - _todayExpenses - _todayPayrollCommission;
     final isPositive = netProfit >= 0;
 
@@ -1190,11 +1267,15 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         side: const BorderSide(color: Colors.black87, width: 2),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: responsive.responsiveValue(
+          mobile: const EdgeInsets.all(16),
+          tablet: const EdgeInsets.all(20),
+          desktop: const EdgeInsets.all(24),
+        ),
         child: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(14),
+              padding: EdgeInsets.all(responsive.isMobile ? 10 : 14),
               decoration: BoxDecoration(
                 color: Colors.black87,
                 borderRadius: BorderRadius.circular(12),
@@ -1202,10 +1283,10 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
               child: Icon(
                 isPositive ? Icons.trending_up : Icons.trending_down,
                 color: Colors.yellow.shade700,
-                size: 32,
+                size: responsive.iconSizeLarge,
               ),
             ),
-            const SizedBox(width: 20),
+            SizedBox(width: responsive.isMobile ? 12 : 20),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1213,26 +1294,32 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
                   Text(
                     "Today's Net Profit",
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: responsive.fontSize(mobile: 14, tablet: 15, desktop: 16),
                       fontWeight: FontWeight.w600,
                       color: Colors.black.withValues(alpha: 0.8),
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    '₱${netProfit.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '₱${netProfit.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: responsive.fontSize(mobile: 24, tablet: 28, desktop: 32),
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
                     ),
                   ),
                   Text(
                     'Revenue: ₱${_todayRevenue.toStringAsFixed(2)} - Expenses: ₱${_todayExpenses.toStringAsFixed(2)} - Payroll: ₱${_todayPayrollCommission.toStringAsFixed(2)}',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: responsive.fontSize(mobile: 11, tablet: 12, desktop: 13),
                       color: Colors.black.withValues(alpha: 0.6),
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -1243,8 +1330,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
     );
   }
 
-  /// Recent Transactions Card
-  Widget _buildRecentTransactionsCard() {
+  Widget _buildRecentTransactionsCard(ResponsiveHelper responsive) {
     return Card(
       color: Colors.yellow.shade50,
       elevation: 2,
@@ -1338,8 +1424,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
     );
   }
 
-  /// Pending Services Card - Shows approved bookings
-  Widget _buildPendingServicesCard() {
+  Widget _buildPendingServicesCard(ResponsiveHelper responsive) {
     return Card(
       color: Colors.yellow.shade50,
       elevation: 2,
@@ -1456,8 +1541,7 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
     );
   }
 
-  /// Low Stock Alert Card
-  Widget _buildLowStockCard() {
+  Widget _buildLowStockCard(ResponsiveHelper responsive) {
     return Card(
       color: Colors.yellow.shade50,
       elevation: 2,

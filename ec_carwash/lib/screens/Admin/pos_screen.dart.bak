@@ -23,19 +23,19 @@ class _POSScreenState extends State<POSScreen> {
   String? _currentCustomerId;
   String? _vehicleTypeForCustomer; // ← use this; if null we’ll ask once
 
-
+  // Controllers for customer form
   final TextEditingController nameController = TextEditingController();
   final TextEditingController plateController = TextEditingController();
   final TextEditingController emailController = TextEditingController();
   final TextEditingController phoneController = TextEditingController();
 
-
+  // Vehicle type for the customer form
   String? _selectedVehicleType;
 
-
+  // Time picker state (defaults to now)
   TimeOfDay _selectedTime = TimeOfDay.now();
 
-
+  // UI state for showing new customer form
   bool _showNewCustomerForm = false;
 
   String _formatTimeOfDay(BuildContext ctx, TimeOfDay tod) {
@@ -53,9 +53,9 @@ class _POSScreenState extends State<POSScreen> {
   bool _hasSearched = false;
   List<Customer> _searchResults = <Customer>[];
   List<Customer> get searchResults => _searchResults;
-  String _searchType = 'plate';
+  String _searchType = 'plate'; // 'plate' or 'name'
 
-
+  // Services data
   List<Service> _services = [];
   bool _isLoadingServices = true;
 
@@ -928,8 +928,9 @@ class _POSScreenState extends State<POSScreen> {
       body: SafeArea(
         child: Row(
           children: [
+            // Product Codes Grid
             Expanded(
-              flex: responsive.isTablet ? 4 : 5,
+              flex: responsive.isTablet ? 5 : 6,
               child: OrientationBuilder(
                 builder: (context, orientation) {
                   return GridView.builder(
@@ -946,8 +947,8 @@ class _POSScreenState extends State<POSScreen> {
                       final product = servicesData[code];
                       if (product == null) return const SizedBox();
 
-
-
+                      // Check if service is applicable for current vehicle type
+                      // Exception: RPT/EC16 (Repaint) uses Standard/Premium pricing, always applicable
                       final prices = product["prices"] as Map<String, dynamic>;
                       final bool isApplicable = code == 'RPT' || code == 'EC16' ||
                                                _vehicleTypeForCustomer == null ||
@@ -965,7 +966,7 @@ class _POSScreenState extends State<POSScreen> {
                             highlightColor: isApplicable ? Colors.yellow.shade100 : null,
                             child: Container(
                               decoration: BoxDecoration(
-
+                                // Modern gradient with brand colors
                                 gradient: LinearGradient(
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
@@ -977,12 +978,12 @@ class _POSScreenState extends State<POSScreen> {
                                   stops: const [0.0, 0.5, 1.0],
                                 ),
                                 borderRadius: BorderRadius.circular(12),
-
+                                // Thin black stroke as requested
                                 border: Border.all(
                                   color: Colors.black87,
                                   width: 1.0,
                                 ),
-
+                                // Enhanced shadow for depth
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.black.withValues(alpha: 0.08),
@@ -1001,7 +1002,7 @@ class _POSScreenState extends State<POSScreen> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-
+                                    // Service code chip with brand styling
                                     Container(
                                       padding: EdgeInsets.symmetric(
                                         horizontal: responsive.isTablet ? 8 : 12,
@@ -1040,7 +1041,7 @@ class _POSScreenState extends State<POSScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 6),
-
+                                    // Service name and description with better typography
                                     Expanded(
                                       child: Column(
                                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1089,11 +1090,11 @@ class _POSScreenState extends State<POSScreen> {
               ),
             ),
 
-
-            if (responsive.width > 700)
-              Expanded(
-                flex: responsive.isTablet ? 4 : 3,
-                child: Column(
+        // Side panel
+        if (responsive.width > 700)
+          Expanded(
+            flex: responsive.isTablet ? 3 : 2,
+            child: Column(
               children: [
                 // Dynamic sizing based on search state
                 Expanded(
@@ -1114,14 +1115,11 @@ class _POSScreenState extends State<POSScreen> {
   }
 
   Widget _buildCustomerForm() {
-    final responsive = context.responsive;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isTablet = screenWidth > 600 && screenWidth <= 1024;
 
     return Container(
-      padding: responsive.responsiveValue(
-        mobile: const EdgeInsets.all(12),
-        tablet: const EdgeInsets.all(14),
-        desktop: const EdgeInsets.all(16),
-      ),
+      padding: EdgeInsets.all(isTablet ? 12 : 16), // Smaller padding for tablets
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1134,7 +1132,7 @@ class _POSScreenState extends State<POSScreen> {
                   "Customer Information",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: responsive.fontSize(mobile: 16, tablet: 17, desktop: 18),
+                    fontSize: isTablet ? 16 : 18,
                     color: Theme.of(context).colorScheme.secondary,
                   ),
                 ),
@@ -1149,9 +1147,9 @@ class _POSScreenState extends State<POSScreen> {
             const SizedBox(height: 12),
 
             if (!_showNewCustomerForm) ...[
-
+              // Show selected customer or search mode
               if (currentCustomer != null || _currentCustomerId != null) ...[
-
+                // Selected Customer Display
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -1880,7 +1878,7 @@ class _POSScreenState extends State<POSScreen> {
 
             // Service Time (always visible and separate from customer data)
             Container(
-              padding: EdgeInsets.all(responsive.isTablet ? 10 : 12),
+              padding: EdgeInsets.all(isTablet ? 10 : 12),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [Colors.yellow.shade50, Colors.white],
@@ -1904,17 +1902,14 @@ class _POSScreenState extends State<POSScreen> {
                 children: [
                   Icon(Icons.access_time, size: 18, color: Colors.blue.shade700),
                   const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      "Service Time: ${_formatTimeOfDay(context, _selectedTime)}",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: Colors.blue.shade700,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+                  Text(
+                    "Service Time: ${_formatTimeOfDay(context, _selectedTime)}",
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue.shade700,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const Spacer(),
                   TextButton.icon(
                     icon: const Icon(Icons.edit, size: 16),
                     label: const Text("Change"),
@@ -1990,8 +1985,8 @@ class _POSScreenState extends State<POSScreen> {
   }
 
   Widget _buildCart() {
-    final responsive = context.responsive;
-    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isTablet = screenWidth > 600 && screenWidth <= 1024;
 
     return Container(
       decoration: BoxDecoration(
@@ -2021,7 +2016,7 @@ class _POSScreenState extends State<POSScreen> {
           // Cart header with theme styling
           Container(
             width: double.infinity,
-            padding: EdgeInsets.all(responsive.isTablet ? 10 : 12),
+            padding: EdgeInsets.all(isTablet ? 10 : 12),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [Colors.yellow.shade700, Colors.yellow.shade800],
@@ -2039,14 +2034,14 @@ class _POSScreenState extends State<POSScreen> {
                 Icon(
                   Icons.shopping_cart,
                   color: Colors.black87,
-                  size: responsive.isTablet ? 18 : 20,
+                  size: isTablet ? 18 : 20,
                 ),
                 const SizedBox(width: 6),
                 Text(
                   "Cart",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: responsive.isTablet ? 14 : 16,
+                    fontSize: isTablet ? 14 : 16,
                     color: Colors.black87,
                     letterSpacing: 0.5,
                   ),
@@ -2064,7 +2059,7 @@ class _POSScreenState extends State<POSScreen> {
                       style: TextStyle(
                         color: Colors.yellow.shade700,
                         fontWeight: FontWeight.bold,
-                        fontSize: responsive.isTablet ? 12 : 14,
+                        fontSize: isTablet ? 12 : 14,
                       ),
                     ),
                   ),
@@ -2081,7 +2076,7 @@ class _POSScreenState extends State<POSScreen> {
                       children: [
                         Icon(
                           Icons.shopping_cart_outlined,
-                          size: responsive.isTablet ? 40 : 48,
+                          size: isTablet ? 40 : 48,
                           color: Colors.grey.shade400,
                         ),
                         const SizedBox(height: 6),
@@ -2089,7 +2084,7 @@ class _POSScreenState extends State<POSScreen> {
                           "No items in cart",
                           style: TextStyle(
                             color: Colors.grey.shade600,
-                            fontSize: responsive.isTablet ? 12 : 14,
+                            fontSize: isTablet ? 12 : 14,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -2097,7 +2092,7 @@ class _POSScreenState extends State<POSScreen> {
                     ),
                   )
                 : ListView.builder(
-                    padding: EdgeInsets.all(responsive.isTablet ? 6 : 8),
+                    padding: EdgeInsets.all(isTablet ? 6 : 8),
                     itemCount: cart.length,
                     itemBuilder: (context, index) {
                       final item = cart[index];
@@ -2121,8 +2116,8 @@ class _POSScreenState extends State<POSScreen> {
                         ),
                         child: ListTile(
                           contentPadding: EdgeInsets.symmetric(
-                            horizontal: responsive.isTablet ? 10 : 12,
-                            vertical: responsive.isTablet ? 2 : 4,
+                            horizontal: isTablet ? 10 : 12,
+                            vertical: isTablet ? 2 : 4,
                           ),
                           leading: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -2134,10 +2129,10 @@ class _POSScreenState extends State<POSScreen> {
                               border: Border.all(color: Colors.black54, width: 0.5),
                             ),
                             child: Text(
-                              _getDisplayCode(item["code"], responsive.isTablet),
+                              _getDisplayCode(item["code"], isTablet),
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: responsive.isTablet ? 10 : 12,
+                                fontSize: isTablet ? 10 : 12,
                                 color: Colors.black87,
                               ),
                             ),
@@ -2146,14 +2141,14 @@ class _POSScreenState extends State<POSScreen> {
                             item["category"],
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
-                              fontSize: responsive.isTablet ? 12 : 13,
+                              fontSize: isTablet ? 12 : 13,
                               color: Colors.grey.shade800,
                             ),
                           ),
                           subtitle: Text(
                             "₱${price.toStringAsFixed(2)} x $qty = ₱${subtotal.toStringAsFixed(2)}",
                             style: TextStyle(
-                              fontSize: responsive.isTablet ? 10 : 11,
+                              fontSize: isTablet ? 10 : 11,
                               color: Colors.grey.shade600,
                               fontWeight: FontWeight.w500,
                             ),
@@ -2168,10 +2163,10 @@ class _POSScreenState extends State<POSScreen> {
                               icon: Icon(
                                 Icons.remove_circle_outline,
                                 color: Colors.red.shade600,
-                                size: responsive.isTablet ? 18 : 20,
+                                size: isTablet ? 18 : 20,
                               ),
                               onPressed: () => removeFromCart(index),
-                              padding: EdgeInsets.all(responsive.isTablet ? 3 : 6),
+                              padding: EdgeInsets.all(isTablet ? 3 : 6),
                               constraints: const BoxConstraints(),
                             ),
                           ),
@@ -2182,7 +2177,7 @@ class _POSScreenState extends State<POSScreen> {
           ),
           // Cart footer with total and checkout
           Container(
-            padding: EdgeInsets.all(responsive.isTablet ? 10 : 12),
+            padding: EdgeInsets.all(isTablet ? 10 : 12),
             decoration: BoxDecoration(
               color: Colors.white,
               border: Border(
@@ -2203,7 +2198,7 @@ class _POSScreenState extends State<POSScreen> {
                       "Total:",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: responsive.isTablet ? 14 : 16,
+                        fontSize: isTablet ? 14 : 16,
                         color: Colors.grey.shade800,
                       ),
                     ),
@@ -2211,7 +2206,7 @@ class _POSScreenState extends State<POSScreen> {
                       "₱${total.toStringAsFixed(2)}",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: responsive.isTablet ? 16 : 18,
+                        fontSize: isTablet ? 16 : 18,
                         color: Colors.green.shade700,
                       ),
                     ),
@@ -2225,7 +2220,7 @@ class _POSScreenState extends State<POSScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: cart.isEmpty ? Colors.grey.shade300 : Colors.yellow.shade700,
                       foregroundColor: cart.isEmpty ? Colors.grey.shade600 : Colors.black87,
-                      padding: EdgeInsets.symmetric(vertical: responsive.isTablet ? 10 : 12),
+                      padding: EdgeInsets.symmetric(vertical: isTablet ? 10 : 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                         side: BorderSide(
@@ -2241,14 +2236,14 @@ class _POSScreenState extends State<POSScreen> {
                       children: [
                         Icon(
                           Icons.payment,
-                          size: responsive.isTablet ? 16 : 18,
+                          size: isTablet ? 16 : 18,
                         ),
                         const SizedBox(width: 6),
                         Text(
                           "Checkout",
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: responsive.isTablet ? 13 : 14,
+                            fontSize: isTablet ? 13 : 14,
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -2271,22 +2266,14 @@ class _POSScreenState extends State<POSScreen> {
     showDialog(
       context: context,
       builder: (context) {
-        final responsive = context.responsive;
         return StatefulBuilder(
           builder: (context, setState) {
             return Dialog(
-              insetPadding: EdgeInsets.symmetric(
-                horizontal: responsive.isMobile ? 16 : 40,
-                vertical: 24,
-              ),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
               child: Container(
-                width: responsive.responsiveValue(
-                  mobile: responsive.width * 0.9,
-                  tablet: 450,
-                  desktop: 500,
-                ),
+                width: 450,
                 constraints: BoxConstraints(
-                  maxHeight: responsive.height * 0.85,
+                  maxHeight: MediaQuery.of(context).size.height * 0.85,
                 ),
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -2743,6 +2730,7 @@ class _POSScreenState extends State<POSScreen> {
         assignedTeam: assignedTeam,
       );
 
+      // Clear cart and reset customer after successful transaction
       if (mounted) {
         setState(() {
           cart.clear();
@@ -2750,7 +2738,6 @@ class _POSScreenState extends State<POSScreen> {
           _currentCustomerId = null;
           _vehicleTypeForCustomer = null;
           _selectedVehicleType = null;
-          _selectedTime = TimeOfDay.now();
           nameController.clear();
           plateController.clear();
           phoneController.clear();
@@ -2887,13 +2874,12 @@ class _POSScreenState extends State<POSScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            final responsive = context.responsive;
             return Dialog(
-              insetPadding: EdgeInsets.all(responsive.isMobile ? 16 : 20),
+              insetPadding: const EdgeInsets.all(20),
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxWidth: responsive.responsiveValue(mobile: responsive.width * 0.9, tablet: 500, desktop: 550),
-                  maxHeight: responsive.height * 0.7,
+                  maxWidth: 500,
+                  maxHeight: MediaQuery.of(context).size.height * 0.7,
                 ),
                 child: Container(
                   padding: const EdgeInsets.all(20),
@@ -3144,16 +3130,11 @@ class _POSScreenState extends State<POSScreen> {
     showDialog(
       context: context,
       builder: (context) {
-        final responsive = context.responsive;
         return Dialog(
-          insetPadding: EdgeInsets.all(responsive.isMobile ? 16 : 40),
+          insetPadding: const EdgeInsets.all(40),
           child: Container(
-            width: responsive.responsiveValue(
-              mobile: responsive.width * 0.95,
-              tablet: responsive.width * 0.8,
-              desktop: responsive.width * 0.75,
-            ),
-            height: responsive.height * 0.7,
+            width: MediaQuery.of(context).size.width * 0.75,
+            height: MediaQuery.of(context).size.height * 0.7,
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               color: Colors.white,

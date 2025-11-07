@@ -150,8 +150,16 @@ class CSVImporter {
   /// Parse date and time from CSV format
   static DateTime _parseDateTime(String dateStr, String timeStr) {
     try {
-      // Parse date (e.g., "1/2/2025" or "2/2/2025")
-      final dateParts = dateStr.split('/');
+      // Parse date - support both slash (1/2/2025) and dash (11-07-2025) formats
+      List<String> dateParts;
+      if (dateStr.contains('/')) {
+        dateParts = dateStr.split('/');
+      } else if (dateStr.contains('-')) {
+        dateParts = dateStr.split('-');
+      } else {
+        throw Exception('Invalid date format: $dateStr. Use M/D/YYYY or MM-DD-YYYY');
+      }
+
       if (dateParts.length != 3) {
         throw Exception('Invalid date format: $dateStr');
       }
