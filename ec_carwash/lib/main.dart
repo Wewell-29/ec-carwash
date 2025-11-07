@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart'; // 👈 make sure you have this file (flutterfire configure)
 import 'theme.dart';
 import 'screens/login_page.dart';
@@ -44,7 +45,43 @@ class ECCarwashApp extends StatelessWidget {
       title: 'EC Carwash',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const LoginPage(),
+      home: const AuthWrapper(),
+    );
+  }
+}
+
+/// Wrapper that checks authentication state and redirects accordingly
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        // Show loading indicator while checking auth state
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        // If user is logged in, redirect to appropriate home screen
+        if (snapshot.hasData && snapshot.data != null) {
+          if (kIsWeb) {
+            // Web users → Admin/Staff Home
+            return const AdminStaffHome();
+          } else {
+            // Android/iOS users → Customer Home
+            return const CustomerHome();
+          }
+        }
+
+        // If not logged in, show login page
+        return const LoginPage();
+      },
     );
   }
 }

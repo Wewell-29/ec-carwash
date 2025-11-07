@@ -473,7 +473,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                                 isExpanded: true,
                                 itemHeight: 56,
                                 decoration: const InputDecoration(
-                                  labelText: "Select Vehicle",
+                                  labelText: "Selected Vehicle",
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.directions_car),
                                 ),
@@ -509,15 +509,13 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                                     ),
                                   );
                                 }).toList(),
-                                onChanged: (vehicle) {
-                                  setState(() {
-                                    _selectedVehicle = vehicle;
-                                    // Clear cart when vehicle changes
-                                    _cart.clear();
-                                  });
-                                  Navigator.pop(context);
-                                  _showCart();
-                                },
+                                onChanged: null, // Make dropdown non-clickable
+                                disabledHint: _selectedVehicle != null
+                                    ? Text(
+                                        '${_selectedVehicle!.plateNumber} — ${_selectedVehicle!.vehicleType ?? "Unknown"} • ${_selectedVehicle!.contactNumber}',
+                                        overflow: TextOverflow.ellipsis,
+                                      )
+                                    : null,
                               );
                             }
                           ),
@@ -742,31 +740,7 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
           ),
         ),
         title: const Text("Book a Service"),
-        actions: _isRebookMode
-            ? []
-            : [
-                Stack(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.shopping_cart),
-                      onPressed: _showCart,
-                    ),
-                    if (_cart.isNotEmpty)
-                      Positioned(
-                        right: 6,
-                        top: 6,
-                        child: CircleAvatar(
-                          radius: 10,
-                          backgroundColor: Colors.red,
-                          child: Text(
-                            "${_cart.length}",
-                            style: const TextStyle(fontSize: 12, color: Colors.white),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ],
+        // Remove cart icon from vehicle selection screen
       ),
       drawer: Drawer(
         child: ListView(
@@ -1209,13 +1183,42 @@ class _VehicleServicesScreenState extends State<VehicleServicesScreen> {
     return serviceKey.toLowerCase().startsWith(_selectedFilter.toLowerCase());
   }
 
+  // Helper function to extract numeric suffix from service code
+  int _extractNumber(String serviceKey) {
+    final match = RegExp(r'\d+$').firstMatch(serviceKey);
+    if (match != null) {
+      return int.tryParse(match.group(0)!) ?? 0;
+    }
+    return 0;
+  }
+
+  // Helper function to extract prefix (alphabetic part) from service code
+  String _extractPrefix(String serviceKey) {
+    return serviceKey.replaceAll(RegExp(r'\d+$'), '');
+  }
+
   @override
   Widget build(BuildContext context) {
     final filteredServices = widget.productsData.entries.where((entry) {
       final prices = entry.value['prices'] as Map<String, dynamic>;
       return prices.containsKey(widget.vehicleType) &&
           _matchesFilter(entry.key);
-    }).toList();
+    }).toList()
+      ..sort((a, b) {
+        final prefixA = _extractPrefix(a.key.toLowerCase());
+        final prefixB = _extractPrefix(b.key.toLowerCase());
+
+        // First, sort by prefix alphabetically
+        final prefixComparison = prefixA.compareTo(prefixB);
+        if (prefixComparison != 0) {
+          return prefixComparison;
+        }
+
+        // If prefixes are the same, sort by number
+        final numA = _extractNumber(a.key);
+        final numB = _extractNumber(b.key);
+        return numA.compareTo(numB);
+      });
 
     return Scaffold(
       appBar: AppBar(

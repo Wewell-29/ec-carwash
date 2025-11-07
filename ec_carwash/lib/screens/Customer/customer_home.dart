@@ -203,6 +203,17 @@ class _CustomerHomeState extends State<CustomerHome> {
                   _buildBookingsList(user, "approved"),
                 ],
               ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const BookServiceScreen()),
+            );
+          },
+          backgroundColor: Colors.yellow[700],
+          foregroundColor: Colors.black,
+          child: const Icon(Icons.add),
+        ),
       ),
     );
   }

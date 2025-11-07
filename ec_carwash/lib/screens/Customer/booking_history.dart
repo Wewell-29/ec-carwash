@@ -10,7 +10,9 @@ import 'account_info_screen.dart';
 import 'notifications_screen.dart';
 
 class BookingHistoryScreen extends StatefulWidget {
-  const BookingHistoryScreen({super.key});
+  final int initialTabIndex; // 0 = Completed, 1 = Cancelled
+
+  const BookingHistoryScreen({super.key, this.initialTabIndex = 0});
 
   @override
   State<BookingHistoryScreen> createState() => _BookingHistoryScreenState();
@@ -121,6 +123,9 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> {
 
     return DefaultTabController(
       length: 2,
+      initialIndex: (widget.initialTabIndex >= 0 && widget.initialTabIndex <= 1)
+          ? widget.initialTabIndex
+          : 0,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Booking History'),

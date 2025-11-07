@@ -233,12 +233,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           MaterialPageRoute(builder: (_) => const CustomerHome(initialTabIndex: 1)),
         );
       }
-    } else if (notification.type == 'booking_completed' ||
-        notification.type == 'booking_cancelled') {
+    } else if (notification.type == 'booking_completed') {
       if (mounted) {
+        // Navigate to BookingHistoryScreen with Completed tab (index 0)
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const BookingHistoryScreen()),
+          MaterialPageRoute(builder: (_) => const BookingHistoryScreen(initialTabIndex: 0)),
+        );
+      }
+    } else if (notification.type == 'booking_cancelled') {
+      if (mounted) {
+        // Navigate to BookingHistoryScreen with Cancelled tab (index 1)
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const BookingHistoryScreen(initialTabIndex: 1)),
         );
       }
     }
