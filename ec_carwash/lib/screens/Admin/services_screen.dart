@@ -104,6 +104,11 @@ class _ServicesScreenState extends State<ServicesScreen> {
     final isWide = MediaQuery.of(context).size.width > 800;
     final categories = ['All', ..._categories];
 
+    // Ensure selected category is in the list (even if all services are inactive)
+    if (_selectedCategory.isNotEmpty && !categories.contains(_selectedCategory)) {
+      categories.add(_selectedCategory);
+    }
+
     return Column(
       children: [
         _buildFilters(categories, isWide),
@@ -156,7 +161,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: DropdownButton<String>(
-                  value: _selectedCategory,
+                  value: categories.contains(_selectedCategory) ? _selectedCategory : 'All',
                   underline: const SizedBox(),
                   hint: const Text('Category'),
                   onChanged: (value) {
@@ -422,30 +427,36 @@ class _ServicesScreenState extends State<ServicesScreen> {
     final categoryController = TextEditingController(text: service.category);
     final descriptionController = TextEditingController(text: service.description);
 
-    // All possible vehicle types
-    final List<String> allVehicleTypes = [
-      'Cars',
-      'SUV',
-      'Van',
-      'Pick-Up',
-      'Delivery Truck (S)',
-      'Delivery Truck (L)',
-      'Motorcycle (S)',
-      'Motorcycle (L)',
-      'Tricycle',
-    ];
+    // Check if this is a repaint service (special case)
+    final isRepaintService = service.code.toUpperCase() == 'RPT' ||
+                             service.name.toLowerCase().contains('repaint');
 
-    // Dynamic vehicle prices map
-    Map<String, TextEditingController> vehicleControllers = {};
-    Map<String, bool> selectedVehicleTypes = {};
+    // For repaint: use Standard/Premium, otherwise use vehicle types
+    final List<String> priceOptions = isRepaintService
+        ? ['Standard', 'Premium']
+        : [
+            'Cars',
+            'SUV',
+            'Van',
+            'Pick-Up',
+            'Delivery Truck (S)',
+            'Delivery Truck (L)',
+            'Motorcycle (S)',
+            'Motorcycle (L)',
+            'Tricycle',
+          ];
+
+    // Dynamic prices map
+    Map<String, TextEditingController> priceControllers = {};
+    Map<String, bool> selectedPriceOptions = {};
 
     // Initialize controllers and selected states based on existing service data
-    for (String type in allVehicleTypes) {
-      vehicleControllers[type] = TextEditingController();
-      selectedVehicleTypes[type] = service.prices.containsKey(type);
+    for (String option in priceOptions) {
+      priceControllers[option] = TextEditingController();
+      selectedPriceOptions[option] = service.prices.containsKey(option);
 
-      if (service.prices.containsKey(type)) {
-        vehicleControllers[type]!.text = service.prices[type]!.toString();
+      if (service.prices.containsKey(option)) {
+        priceControllers[option]!.text = service.prices[option]!.toString();
       }
     }
 
@@ -476,31 +487,34 @@ class _ServicesScreenState extends State<ServicesScreen> {
                   maxLines: 3,
                 ),
                 const SizedBox(height: 16),
-                const Text('Vehicle Types & Prices:', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  isRepaintService ? 'Price Options:' : 'Vehicle Types & Prices:',
+                  style: const TextStyle(fontWeight: FontWeight.bold)
+                ),
                 const SizedBox(height: 8),
-                ...allVehicleTypes.map((vehicleType) => Column(
+                ...priceOptions.map((option) => Column(
                   children: [
                     CheckboxListTile(
                       dense: true,
-                      title: Text(vehicleType),
-                      value: selectedVehicleTypes[vehicleType],
+                      title: Text(option),
+                      value: selectedPriceOptions[option],
                       onChanged: (bool? value) {
                         setDialogState(() {
-                          selectedVehicleTypes[vehicleType] = value ?? false;
+                          selectedPriceOptions[option] = value ?? false;
                           // Clear price when unchecked
                           if (!(value ?? false)) {
-                            vehicleControllers[vehicleType]!.clear();
+                            priceControllers[option]!.clear();
                           }
                         });
                       },
                     ),
-                    if (selectedVehicleTypes[vehicleType] == true)
+                    if (selectedPriceOptions[option] == true)
                       Padding(
                         padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
                         child: TextField(
-                          controller: vehicleControllers[vehicleType],
+                          controller: priceControllers[option],
                           decoration: InputDecoration(
-                            labelText: '$vehicleType Price',
+                            labelText: '$option Price',
                             prefixText: '₱',
                           ),
                           keyboardType: TextInputType.number,
@@ -523,13 +537,13 @@ class _ServicesScreenState extends State<ServicesScreen> {
                     categoryController.text.isNotEmpty &&
                     descriptionController.text.isNotEmpty) {
 
-                  // Build prices map for selected vehicle types
+                  // Build prices map for selected options
                   Map<String, double> prices = {};
                   bool hasValidPrices = true;
 
-                  for (String vehicleType in allVehicleTypes) {
-                    if (selectedVehicleTypes[vehicleType] == true) {
-                      final priceText = vehicleControllers[vehicleType]!.text;
+                  for (String option in priceOptions) {
+                    if (selectedPriceOptions[option] == true) {
+                      final priceText = priceControllers[option]!.text;
                       if (priceText.isEmpty) {
                         hasValidPrices = false;
                         break;
@@ -539,14 +553,14 @@ class _ServicesScreenState extends State<ServicesScreen> {
                         hasValidPrices = false;
                         break;
                       }
-                      prices[vehicleType] = price;
+                      prices[option] = price;
                     }
                   }
 
                   if (!hasValidPrices || prices.isEmpty) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Please enter valid prices for selected vehicle types')),
+                        SnackBar(content: Text('Please enter valid prices for selected ${isRepaintService ? "options" : "vehicle types"}')),
                       );
                     }
                     return;

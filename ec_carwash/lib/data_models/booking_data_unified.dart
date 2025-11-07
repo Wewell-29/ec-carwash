@@ -432,7 +432,7 @@ class BookingManager {
 
       // Create in-app notification for reschedule (customer side)
       final updated = await _firestore.collection(_collection).doc(bookingId).get();
-      final bookingData = updated.data() as Map<String, dynamic>?;
+      final bookingData = updated.data();
       final userEmail = bookingData?['userEmail'] as String?;
 
       if (userEmail != null && userEmail.isNotEmpty) {

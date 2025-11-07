@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:ec_carwash/data_models/expense_data.dart';
 import 'package:ec_carwash/data_models/inventory_data.dart';
 import 'package:intl/intl.dart';
@@ -437,12 +438,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     // Load inventory items for Supplies dropdown
     List<String> inventoryItems = [];
     String? selectedInventoryItem;
-    bool showCustomDescription = false;
 
+    // Store full inventory for later use
+    List<InventoryItem> fullInventory = [];
     try {
-      final inventory = await InventoryManager.getItems();
-      inventoryItems = inventory.map((item) => item.name).toList();
-      inventoryItems.add('Others'); // Add Others option
+      fullInventory = await InventoryManager.getItems();
+      inventoryItems = fullInventory.map((item) => item.name).toList();
     } catch (e) {
       debugPrint('Error loading inventory: $e');
     }
@@ -523,26 +524,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         onChanged: (value) {
                           setDialogState(() {
                             selectedInventoryItem = value;
-                            showCustomDescription = value == 'Others';
-                            if (value != 'Others' && value != null) {
+                            if (value != null) {
                               descriptionController.text = value;
-                            } else {
-                              descriptionController.clear();
                             }
                           });
                         },
                       ),
-                      if (showCustomDescription) ...[
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: descriptionController,
-                          decoration: const InputDecoration(
-                            labelText: 'Custom Description *',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.description),
-                          ),
-                        ),
-                      ],
                     ] else ...[
                       TextField(
                         controller: descriptionController,
@@ -567,7 +554,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                               border: OutlineInputBorder(),
                               prefixText: '₱',
                             ),
-                            keyboardType: TextInputType.number,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                            ],
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -579,6 +569,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                               border: OutlineInputBorder(),
                             ),
                             keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
                           ),
                         ),
                       ],
@@ -638,6 +631,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       : null;
 
                   try {
+                    // Find inventory item if supplies category
+                    String? inventoryItemId;
+                    String? inventoryItemName;
+                    if (selectedCategory == 'Supplies' && selectedInventoryItem != null) {
+                      final item = fullInventory.firstWhere(
+                        (inv) => inv.name == selectedInventoryItem,
+                        orElse: () => fullInventory.first,
+                      );
+                      inventoryItemId = item.id;
+                      inventoryItemName = item.name;
+                    }
+
                     // Create expense
                     final expense = ExpenseData(
                       date: selectedDate,
@@ -651,17 +656,33 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       notes: notesController.text.trim().isNotEmpty
                           ? notesController.text.trim()
                           : null,
+                      inventoryItemId: inventoryItemId,
+                      inventoryItemName: inventoryItemName,
                       addedBy: 'Admin', // TODO: Get from auth
                       createdAt: DateTime.now(),
                     );
 
                     await ExpenseManager.addExpense(expense);
+
+                    // Update inventory if supplies category
+                    if (selectedCategory == 'Supplies' && inventoryItemId != null && quantity != null && quantity > 0) {
+                      final item = fullInventory.firstWhere((inv) => inv.id == inventoryItemId);
+                      await InventoryManager.updateStock(
+                        inventoryItemId,
+                        item.currentStock + quantity,
+                      );
+                    }
+
                     await _loadExpenses();
                     if (mounted) {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Expense added successfully'),
+                        SnackBar(
+                          content: Text(
+                            selectedCategory == 'Supplies' && quantity != null
+                                ? 'Expense added and inventory updated (+$quantity)'
+                                : 'Expense added successfully'
+                          ),
                           backgroundColor: Colors.green,
                         ),
                       );
