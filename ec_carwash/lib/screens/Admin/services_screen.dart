@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:ec_carwash/data_models/services_data.dart';
+import 'package:ec_carwash/utils/responsive_helper.dart';
 
 class ServicesScreen extends StatefulWidget {
   final Function(VoidCallback)? onShowAddDialog;
@@ -23,7 +24,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
     super.initState();
     _loadData();
 
-    // Register the add dialog callback with parent
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.onShowAddDialog != null) {
         widget.onShowAddDialog!(_showAddServiceDialog);
@@ -65,9 +66,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
       ).toList();
     }
 
-    // Sort services in proper order: EC1-15, UPGRADE1-4, PROMO1-4 (same as POS)
+
     services.sort((a, b) {
-      // Helper function to get sort priority
+
       int getSortPriority(String code) {
         if (code.startsWith('EC')) return 1;
         if (code.startsWith('UPGRADE')) return 2;
@@ -75,7 +76,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
         return 4;
       }
 
-      // Helper function to extract number from code
+
       int getCodeNumber(String code) {
         final numStr = code.replaceAll(RegExp(r'[^0-9]'), '');
         return int.tryParse(numStr) ?? 0;
@@ -88,7 +89,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
         return priorityA.compareTo(priorityB);
       }
 
-      // Within same category, sort by number
+
       return getCodeNumber(a.code).compareTo(getCodeNumber(b.code));
     });
 
@@ -101,36 +102,39 @@ class _ServicesScreenState extends State<ServicesScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final isWide = MediaQuery.of(context).size.width > 800;
+    final responsive = context.responsive;
     final categories = ['All', ..._categories];
 
-    // Ensure selected category is in the list (even if all services are inactive)
     if (_selectedCategory.isNotEmpty && !categories.contains(_selectedCategory)) {
       categories.add(_selectedCategory);
     }
 
     return Column(
       children: [
-        _buildFilters(categories, isWide),
+        _buildFilters(categories, responsive),
         Expanded(
-          child: _buildServicesList(isWide),
+          child: _buildServicesList(responsive),
         ),
       ],
     );
   }
 
-  Widget _buildFilters(List<String> categories, bool isWide) {
+  Widget _buildFilters(List<String> categories, ResponsiveHelper responsive) {
     final activeServices = _allServices.where((service) => service.isActive).length;
     final totalServices = _allServices.length;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: responsive.responsiveValue(
+        mobile: const EdgeInsets.all(12),
+        tablet: const EdgeInsets.all(14),
+        desktop: const EdgeInsets.all(16),
+      ),
       child: Column(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
+          if (responsive.isMobile)
+            Column(
+              children: [
+                TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
                     labelText: 'Search services...',
@@ -152,63 +156,143 @@ class _ServicesScreenState extends State<ServicesScreen> {
                     });
                   },
                 ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade400),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: DropdownButton<String>(
-                  value: categories.contains(_selectedCategory) ? _selectedCategory : 'All',
-                  underline: const SizedBox(),
-                  hint: const Text('Category'),
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedCategory = value!;
-                    });
-                  },
-                  items: categories.map((category) {
-                    return DropdownMenuItem(
-                      value: category,
-                      child: Text(category),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.yellow.shade50,
-                  border: Border.all(color: Colors.black87, width: 1.5),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                const SizedBox(height: 12),
+                Row(
                   children: [
-                    Icon(Icons.check_circle, color: Colors.black87, size: 20),
-                    const SizedBox(width: 8),
-                    Text(
-                      '$activeServices / $totalServices Active',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                        fontSize: 14,
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade400),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: DropdownButton<String>(
+                          value: categories.contains(_selectedCategory) ? _selectedCategory : 'All',
+                          underline: const SizedBox(),
+                          hint: const Text('Category'),
+                          isExpanded: true,
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedCategory = value!;
+                            });
+                          },
+                          items: categories.map((category) {
+                            return DropdownMenuItem(
+                              value: category,
+                              child: Text(category),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.yellow.shade50,
+                        border: Border.all(color: Colors.black87, width: 1.5),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '$activeServices/$totalServices',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  flex: responsive.isTablet ? 2 : 3,
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      labelText: 'Search services...',
+                      prefixIcon: const Icon(Icons.search),
+                      border: const OutlineInputBorder(),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _searchQuery = '');
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade400),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: DropdownButton<String>(
+                    value: categories.contains(_selectedCategory) ? _selectedCategory : 'All',
+                    underline: const SizedBox(),
+                    hint: const Text('Category'),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedCategory = value!;
+                      });
+                    },
+                    items: categories.map((category) {
+                      return DropdownMenuItem(
+                        value: category,
+                        child: Text(category),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: responsive.isTablet ? 12 : 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.yellow.shade50,
+                    border: Border.all(color: Colors.black87, width: 1.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.black87, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        '$activeServices / $totalServices Active',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                          fontSize: responsive.fontSize(mobile: 13, tablet: 13, desktop: 14),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildServicesList(bool isWide) {
+  Widget _buildServicesList(ResponsiveHelper responsive) {
     final services = _filteredServices;
 
     if (services.isEmpty) {
@@ -218,11 +302,15 @@ class _ServicesScreenState extends State<ServicesScreen> {
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: responsive.responsiveValue(
+        mobile: const EdgeInsets.all(12),
+        tablet: const EdgeInsets.all(14),
+        desktop: const EdgeInsets.all(16),
+      ),
       itemCount: services.length,
       itemBuilder: (context, index) {
         final service = services[index];
-        // Shorten code for display: PROMO4 -> PR4, UPGRADE1 -> UP1
+
         String displayCode = service.code
             .replaceAll('PROMO', 'PR')
             .replaceAll('UPGRADE', 'UP');

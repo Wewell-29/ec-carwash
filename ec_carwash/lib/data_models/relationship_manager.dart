@@ -71,6 +71,13 @@ class RelationshipManager {
       throw Exception('Booking must have an ID to complete');
     }
 
+    // Check if transaction already exists for this booking
+    final existingTransaction = await TransactionManager.getTransactionByBookingId(booking.id!);
+    if (existingTransaction != null) {
+      // Transaction already exists, return existing ID
+      return existingTransaction.id!;
+    }
+
     // Step 1: Create transaction from booking
     final transactionId = await TransactionManager.createFromBooking(
       bookingId: booking.id!,

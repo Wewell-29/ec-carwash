@@ -500,7 +500,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
       // Update booking status
       await BookingManager.updateBookingStatus(bookingId, status);
 
-      // If marking as completed, add commission
+      // If marking as completed, add commission and create transaction
       if (status == 'completed') {
         // Calculate and add team commission (35%)
         final commission =
@@ -511,10 +511,12 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         await FirebaseFirestore.instance
             .collection('Bookings')
             .doc(bookingId)
-            .update({'teamCommission': commission});
+            .update({
+              'teamCommission': commission,
+            });
 
-        // Only create transaction if it doesn't already exist
-        // Transaction is now created when marking as paid, not at completion
+        // Create transaction when marking as completed (for customer-app bookings)
+        // POS bookings already have transactions created at time of sale
         if (booking.source != 'pos' && booking.transactionId == null) {
           await _createTransactionFromBooking(booking);
         }
@@ -580,24 +582,22 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
       if (confirmed != true) return;
 
-      // Update payment status to 'paid'
+      // Update payment status to 'paid' and change status to 'approved'
       await FirebaseFirestore.instance
           .collection('Bookings')
           .doc(booking.id)
           .update({
             'paymentStatus': 'paid',
+            'status': 'approved',
             'updatedAt': FieldValue.serverTimestamp(),
           });
-
-      // Create transaction immediately when paid
-      await _createTransactionFromBooking(booking);
 
       await _loadBookings();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Booking marked as paid and transaction created'),
+            content: Text('Payment confirmed. Booking moved to Approved.'),
             backgroundColor: Colors.green,
           ),
         );

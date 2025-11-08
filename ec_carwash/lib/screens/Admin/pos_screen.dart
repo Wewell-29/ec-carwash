@@ -75,7 +75,6 @@ class _POSScreenState extends State<POSScreen> {
       });
     } catch (e) {
       setState(() => _isLoadingServices = false);
-      debugPrint('Error loading services: $e');
     }
   }
 
@@ -228,7 +227,6 @@ class _POSScreenState extends State<POSScreen> {
         _selectedVehicleType = _vehicleTypeForCustomer;
       });
     } catch (e) {
-      debugPrint('Failed to load customer by plate: $e');
     }
   }
 
@@ -277,7 +275,6 @@ class _POSScreenState extends State<POSScreen> {
         isSearching = false;
         _hasSearched = true;
       });
-      debugPrint('Search failed: $e');
     }
   }
 
@@ -352,7 +349,7 @@ class _POSScreenState extends State<POSScreen> {
         vehicleType: _selectedVehicleType,
       );
 
-      // ⬇️ Use the upsert-by-plate logic (update if exists, create if not)
+      
       final customerId = await _saveOrUpdateCustomerByPlate(base);
 
       setState(() {
@@ -416,7 +413,7 @@ class _POSScreenState extends State<POSScreen> {
     _showVehicleTypeDialog(code); // ask only if not saved
   }
 
-  // ⬇️ Dialog now has NO checkbox; it only lets user pick once when none is saved
+  
   void _showVehicleTypeDialog(String code) {
     final product = servicesData[code];
     if (product == null) return;
@@ -426,55 +423,90 @@ class _POSScreenState extends State<POSScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Add $code to Cart'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Choose the vehicle type for pricing:'),
-              const SizedBox(height: 16),
-              ...priceEntries.map((entry) {
-                final vehicleType = entry.key;
-                final price = (entry.value as num).toDouble();
-                IconData icon = Icons.directions_car;
-                Color color = Colors.yellow.shade700;
-
-                if (vehicleType.contains('Motorcycle')) {
-                  icon = Icons.motorcycle;
-                  color = Colors.green;
-                } else if (vehicleType.contains('Truck')) {
-                  icon = Icons.local_shipping;
-                  color = Colors.red;
-                } else if (vehicleType.contains('Van') ||
-                    vehicleType.contains('SUV')) {
-                  icon = Icons.airport_shuttle;
-                  color = Colors.orange;
-                } else if (vehicleType.contains('Tricycle')) {
-                  icon = Icons.pedal_bike;
-                  color = Colors.purple;
-                }
-
-                return ListTile(
-                  leading: Icon(icon, color: color),
-                  title: Text(vehicleType),
-                  subtitle: Text('₱${price.toStringAsFixed(2)}'),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    // Remember automatically the first time (since nothing saved yet)
-                    await _addSingleCodeToCart(
-                      code,
-                      vehicleType,
-                      price,
-                      remember: true,
-                    );
-                  },
-                );
-              }),
-            ],
+      builder: (context) {
+        final responsive = context.responsive;
+        return Dialog(
+          insetPadding: EdgeInsets.symmetric(
+            horizontal: responsive.isMobile ? 16 : 40,
+            vertical: 24,
           ),
-        ),
-      ),
+          child: Container(
+            width: responsive.responsiveValue(
+              mobile: responsive.width * 0.9,
+              tablet: 400,
+              desktop: 450,
+            ),
+            constraints: BoxConstraints(
+              maxHeight: responsive.height * 0.7,
+            ),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.black87, width: 1.5),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Add $code to Cart',
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text('Choose the vehicle type for pricing:'),
+                const SizedBox(height: 16),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: priceEntries.map((entry) {
+                        final vehicleType = entry.key;
+                        final price = (entry.value as num).toDouble();
+                        IconData icon = Icons.directions_car;
+                        Color color = Colors.yellow.shade700;
+
+                        if (vehicleType.contains('Motorcycle')) {
+                          icon = Icons.motorcycle;
+                          color = Colors.green;
+                        } else if (vehicleType.contains('Truck')) {
+                          icon = Icons.local_shipping;
+                          color = Colors.red;
+                        } else if (vehicleType.contains('Van') ||
+                            vehicleType.contains('SUV')) {
+                          icon = Icons.airport_shuttle;
+                          color = Colors.orange;
+                        } else if (vehicleType.contains('Tricycle')) {
+                          icon = Icons.pedal_bike;
+                          color = Colors.purple;
+                        }
+
+                        return ListTile(
+                          leading: Icon(icon, color: color),
+                          title: Text(vehicleType),
+                          subtitle: Text('₱${price.toStringAsFixed(2)}'),
+                          onTap: () async {
+                            Navigator.pop(context);
+                            await _addSingleCodeToCart(
+                              code,
+                              vehicleType,
+                              price,
+                              remember: true,
+                            );
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -492,44 +524,68 @@ class _POSScreenState extends State<POSScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final pricePerPanel = selectedQuality == 'Standard' ? standardPrice : premiumPrice;
-          final totalPrice = pricePerPanel * selectedPanels;
+      builder: (context) {
+        final responsive = context.responsive;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final pricePerPanel = selectedQuality == 'Standard' ? standardPrice : premiumPrice;
+            final totalPrice = pricePerPanel * selectedPanels;
 
-          return AlertDialog(
-            backgroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.black87, width: 2),
-            ),
-            title: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.yellow.shade700, Colors.yellow.shade800],
+            return Dialog(
+              insetPadding: EdgeInsets.symmetric(
+                horizontal: responsive.isMobile ? 16 : 40,
+                vertical: 24,
+              ),
+              child: Container(
+                width: responsive.responsiveValue(
+                  mobile: responsive.width * 0.9,
+                  tablet: 450,
+                  desktop: 500,
                 ),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.black87, width: 1),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.format_paint, color: Colors.black87, size: 24),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'Repaint Service',
-                    style: TextStyle(
-                      color: Colors.black87,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
+                constraints: BoxConstraints(
+                  maxHeight: responsive.height * 0.8,
+                ),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black87, width: 2),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Colors.yellow.shade700, Colors.yellow.shade800],
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.black87, width: 1),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.format_paint, color: Colors.black87, size: 24),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Repaint Service',
+                            style: TextStyle(
+                              color: Colors.black87,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+                    const SizedBox(height: 20),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                 // Quality Selection
                 const Text(
                   'Select Quality:',
@@ -790,75 +846,87 @@ class _POSScreenState extends State<POSScreen> {
                     ],
                   ),
                 ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  'Cancel',
-                  style: TextStyle(color: Colors.black87),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  Navigator.pop(context);
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text(
+                              'Cancel',
+                              style: TextStyle(color: Colors.black87),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              Navigator.pop(context);
 
-                  // Check if repaint already exists in cart
-                  final existingIndex = cart.indexWhere((item) => item["code"] == 'RPT');
-                  if (existingIndex >= 0) {
-                    // Update quantity and price
-                    setState(() {
-                      cart[existingIndex]["quantity"] = selectedPanels;
-                      cart[existingIndex]["price"] = pricePerPanel;
-                      cart[existingIndex]["category"] = selectedQuality;
-                    });
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Updated: $selectedQuality - $selectedPanels panel(s)'),
-                          backgroundColor: Colors.yellow.shade700,
+                              final existingIndex = cart.indexWhere((item) => item["code"] == 'RPT');
+                              if (existingIndex >= 0) {
+                                setState(() {
+                                  cart[existingIndex]["quantity"] = selectedPanels;
+                                  cart[existingIndex]["price"] = pricePerPanel;
+                                  cart[existingIndex]["category"] = selectedQuality;
+                                });
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Updated: $selectedQuality - $selectedPanels panel(s)'),
+                                      backgroundColor: Colors.yellow.shade700,
+                                    ),
+                                  );
+                                }
+                              } else {
+                                setState(() {
+                                  cart.add({
+                                    "code": 'RPT',
+                                    "name": product["name"],
+                                    "category": selectedQuality,
+                                    "price": pricePerPanel,
+                                    "quantity": selectedPanels,
+                                  });
+                                });
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Added: $selectedQuality Repaint - $selectedPanels panel(s)'),
+                                      backgroundColor: Colors.yellow.shade700,
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.yellow.shade700,
+                              foregroundColor: Colors.black87,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Text(
+                              'Add to Cart',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
                         ),
-                      );
-                    }
-                  } else {
-                    // Add new repaint service
-                    setState(() {
-                      cart.add({
-                        "code": 'RPT',
-                        "name": product["name"],
-                        "category": selectedQuality,
-                        "price": pricePerPanel,
-                        "quantity": selectedPanels,
-                      });
-                    });
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Added: $selectedQuality Repaint - $selectedPanels panel(s)'),
-                          backgroundColor: Colors.yellow.shade700,
-                        ),
-                      );
-                    }
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.yellow.shade700,
-                  foregroundColor: Colors.black87,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Add to Cart',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-            ],
-          );
-        },
-      ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -1055,9 +1123,25 @@ class _POSScreenState extends State<POSScreen> {
                                               height: 1.2,
                                               letterSpacing: 0.2,
                                             ),
-                                            maxLines: 3,
+                                            maxLines: responsive.isDesktop ? 2 : 3,
                                             overflow: TextOverflow.ellipsis,
                                           ),
+                                          if (responsive.isDesktop && product["description"] != null && (product["description"] as String).isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Flexible(
+                                              child: Text(
+                                                product["description"],
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.grey.shade600,
+                                                  height: 1.2,
+                                                ),
+                                                maxLines: 4,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
                                         ],
                                       ),
                                     ),
@@ -1902,14 +1986,14 @@ class _POSScreenState extends State<POSScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.access_time, size: 18, color: Colors.blue.shade700),
+                  const Icon(Icons.access_time, size: 18, color: Colors.black87),
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
                       "Service Time: ${_formatTimeOfDay(context, _selectedTime)}",
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontWeight: FontWeight.w600,
-                        color: Colors.blue.shade700,
+                        color: Colors.black87,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2332,109 +2416,120 @@ class _POSScreenState extends State<POSScreen> {
                     const SizedBox(height: 12),
                     Divider(thickness: 1, color: Colors.grey.shade300),
                     const SizedBox(height: 12),
-                    // Customer Information Section
-                    if (nameController.text.trim().isNotEmpty || plateController.text.trim().isNotEmpty) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.yellow.shade50, Colors.yellow.shade100],
-                          ),
-                          border: Border.all(color: Colors.black87, width: 1.5),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
+                    // Scrollable Content
+                    Flexible(
+                      child: SingleChildScrollView(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Row(
-                              children: [
-                                Icon(Icons.person, color: Colors.black87, size: 18),
-                                const SizedBox(width: 6),
-                                const Text(
-                                  "Customer Information",
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
-                                    color: Colors.black87,
+                            // Customer Information Section
+                            if (nameController.text.trim().isNotEmpty || plateController.text.trim().isNotEmpty) ...[
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [Colors.yellow.shade50, Colors.yellow.shade100],
                                   ),
+                                  border: Border.all(color: Colors.black87, width: 1.5),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                              ],
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(Icons.person, color: Colors.black87, size: 18),
+                                        const SizedBox(width: 6),
+                                        const Text(
+                                          "Customer Information",
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    if (nameController.text.trim().isNotEmpty)
+                                      Text(
+                                        "Name: ${nameController.text.trim()}",
+                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
+                                      ),
+                                    if (plateController.text.trim().isNotEmpty)
+                                      Text(
+                                        "Plate: ${plateController.text.trim().toUpperCase()}",
+                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            // Services Section
+                            Text(
+                              "Services:",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: Colors.grey.shade700,
+                              ),
                             ),
-                            const SizedBox(height: 6),
-                            if (nameController.text.trim().isNotEmpty)
-                              Text(
-                                "Name: ${nameController.text.trim()}",
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
-                              ),
-                            if (plateController.text.trim().isNotEmpty)
-                              Text(
-                                "Plate: ${plateController.text.trim().toUpperCase()}",
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
-                              ),
+                            const SizedBox(height: 8),
+                            ...cart.map((item) {
+                              final price = (item["price"] as num).toDouble();
+                              final qty = (item["quantity"] ?? 0) as int;
+                              final subtotal = price * qty;
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 6),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade50,
+                                  border: Border.all(color: Colors.grey.shade200),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            "${item["code"]} - ${item["category"]}",
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            "₱${price.toStringAsFixed(2)} x $qty",
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey.shade600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Text(
+                                      "₱${subtotal.toStringAsFixed(2)}",
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
                           ],
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    // Services Section
-                    Text(
-                      "Services:",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: Colors.grey.shade700,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    ...cart.map((item) {
-                      final price = (item["price"] as num).toDouble();
-                      final qty = (item["quantity"] ?? 0) as int;
-                      final subtotal = price * qty;
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 6),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          border: Border.all(color: Colors.grey.shade200),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    "${item["code"]} - ${item["category"]}",
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    "₱${price.toStringAsFixed(2)} x $qty",
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              "₱${subtotal.toStringAsFixed(2)}",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
                     const SizedBox(height: 12),
                     Divider(thickness: 2, color: Colors.black87),
                     const SizedBox(height: 8),
@@ -2461,10 +2556,10 @@ class _POSScreenState extends State<POSScreen> {
                           ),
                           Text(
                             "₱${total.toStringAsFixed(2)}",
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 18,
-                              color: Colors.yellow.shade800,
+                              color: Colors.black87,
                             ),
                           ),
                         ],
@@ -2803,7 +2898,6 @@ class _POSScreenState extends State<POSScreen> {
 
       await FirebaseFirestore.instance.collection("Bookings").add(bookingData);
     } catch (e) {
-      debugPrint('Failed to create booking from POS transaction: $e');
     }
   }
 
@@ -3434,7 +3528,6 @@ class _POSScreenState extends State<POSScreen> {
                               regularFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Regular.ttf"));
                               boldFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Bold.ttf"));
                             } catch (e) {
-                              debugPrint('Using default fonts: $e');
                             }
 
                             // Thermal receipt style - 80mm width (226.77 points)
@@ -3769,7 +3862,6 @@ class _POSScreenState extends State<POSScreen> {
                               if (context.mounted) Navigator.pop(context);
                             }
                           } catch (e) {
-                            debugPrint('Error generating receipt: $e');
                             if (mounted && context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(

@@ -168,9 +168,6 @@ class _AdminStaffHomeState extends State<AdminStaffHome> {
         }
       }
 
-      if (approvedBookings.length > 5) {
-        approvedBookings = approvedBookings.sublist(0, 5);
-      }
 
       pendingBookings.sort((a, b) {
         final dateA = a['scheduledDate'] as DateTime?;

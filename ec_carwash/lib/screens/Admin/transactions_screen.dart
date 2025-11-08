@@ -518,7 +518,6 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         regularFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Regular.ttf"));
         boldFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Bold.ttf"));
       } catch (e) {
-        debugPrint('Using default fonts: $e');
       }
 
       final transactionId = transaction.id?.substring(0, 12) ?? 'N/A';
@@ -976,11 +975,12 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
               pw.Table(
                 border: pw.TableBorder.all(),
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(1),
-                  1: const pw.FlexColumnWidth(1.5),
-                  2: const pw.FlexColumnWidth(1.2),
+                  0: const pw.FlexColumnWidth(0.9),
+                  1: const pw.FlexColumnWidth(1.3),
+                  2: const pw.FlexColumnWidth(1),
                   3: const pw.FlexColumnWidth(1.5),
-                  4: const pw.FlexColumnWidth(1),
+                  4: const pw.FlexColumnWidth(0.8),
+                  5: const pw.FlexColumnWidth(0.9),
                 },
                 children: [
                   pw.TableRow(
@@ -990,6 +990,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                       _buildPdfTableCell('Customer', isHeader: true),
                       _buildPdfTableCell('Plate', isHeader: true),
                       _buildPdfTableCell('Services', isHeader: true),
+                      _buildPdfTableCell('Team', isHeader: true),
                       _buildPdfTableCell('Amount', isHeader: true),
                     ],
                   ),
@@ -1000,6 +1001,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                         _buildPdfTableCell(t.customerName.isNotEmpty ? t.customerName : 'N/A'),
                         _buildPdfTableCell(t.vehiclePlateNumber.isNotEmpty ? t.vehiclePlateNumber : 'N/A'),
                         _buildPdfTableCell(t.services.map((s) => s.serviceCode).join(', ')),
+                        _buildPdfTableCell(t.assignedTeam ?? 'N/A'),
                         _buildPdfTableCell('P${t.total.toStringAsFixed(2)}'),
                       ],
                     ),
