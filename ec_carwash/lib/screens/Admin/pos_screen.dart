@@ -33,7 +33,7 @@ class _POSScreenState extends State<POSScreen> {
   String? _selectedVehicleType;
 
 
-  TimeOfDay _selectedTime = TimeOfDay.now();
+  TimeOfDay? _selectedTime;
 
 
   bool _showNewCustomerForm = false;
@@ -1990,7 +1990,7 @@ class _POSScreenState extends State<POSScreen> {
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
-                      "Service Time: ${_formatTimeOfDay(context, _selectedTime)}",
+                      "Service Time: ${_selectedTime != null ? _formatTimeOfDay(context, _selectedTime!) : '--:--'}",
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
                         color: Colors.black87,
@@ -2005,7 +2005,7 @@ class _POSScreenState extends State<POSScreen> {
                     onPressed: () async {
                       final picked = await showTimePicker(
                         context: context,
-                        initialTime: _selectedTime,
+                        initialTime: _selectedTime ?? TimeOfDay.now(),
                       );
                       if (picked != null) {
                         // Prevent selecting past time
@@ -2031,7 +2031,9 @@ class _POSScreenState extends State<POSScreen> {
                           return;
                         }
 
-                        setState(() => _selectedTime = picked);
+                        setState(() {
+                          _selectedTime = picked;
+                        });
                       }
                     },
                     style: TextButton.styleFrom(
@@ -2075,33 +2077,36 @@ class _POSScreenState extends State<POSScreen> {
 
   Widget _buildCart() {
     final responsive = context.responsive;
-    
 
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.yellow.shade50,
-            Colors.white,
-          ],
-        ),
-        border: Border.all(color: Colors.black87, width: 1),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(12),
-          topRight: Radius.circular(12),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.yellow.shade50,
+                Colors.white,
+              ],
+            ),
+            border: Border.all(color: Colors.black87, width: 1),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(12),
+              topRight: Radius.circular(12),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 8,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Column(
-        children: [
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
           // Cart header with theme styling
           Container(
             width: double.infinity,
@@ -2343,8 +2348,10 @@ class _POSScreenState extends State<POSScreen> {
               ],
             ),
           ),
-        ],
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -2730,12 +2737,13 @@ class _POSScreenState extends State<POSScreen> {
   }) async {
     try {
       final now = DateTime.now();
+      final serviceTime = _selectedTime ?? TimeOfDay.now();
       final txnDateTime = DateTime(
         now.year,
         now.month,
         now.day,
-        _selectedTime.hour,
-        _selectedTime.minute,
+        serviceTime.hour,
+        serviceTime.minute,
       );
 
       // 👤 Customer (unified shape) - prioritize text controllers as they are the source of truth
@@ -2809,9 +2817,9 @@ class _POSScreenState extends State<POSScreen> {
         "date": Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
         "transactionDate": Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
         "time": {
-          "hour": _selectedTime.hour,
-          "minute": _selectedTime.minute,
-          "formatted": _formatTimeOfDay(context, _selectedTime),
+          "hour": serviceTime.hour,
+          "minute": serviceTime.minute,
+          "formatted": _formatTimeOfDay(context, serviceTime),
         },
         "transactionAt": Timestamp.fromDate(txnDateTime),
         "paymentMethod": "cash",
@@ -2819,7 +2827,7 @@ class _POSScreenState extends State<POSScreen> {
         "status": "completed",
         "source": "pos",
         "assignedTeam": assignedTeam ?? "Unassigned",
-        "teamCommission": 0.0, // Commission added only when booking is marked completed
+        "teamCommission": (assignedTeam != null && assignedTeam != "Unassigned") ? totalAmount * 0.35 : 0.0,
         "createdAt": FieldValue.serverTimestamp(),
       };
 
@@ -2845,7 +2853,7 @@ class _POSScreenState extends State<POSScreen> {
           _currentCustomerId = null;
           _vehicleTypeForCustomer = null;
           _selectedVehicleType = null;
-          _selectedTime = TimeOfDay.now();
+          _selectedTime = null;
           nameController.clear();
           plateController.clear();
           phoneController.clear();
@@ -2891,7 +2899,7 @@ class _POSScreenState extends State<POSScreen> {
         "source": "pos",
         "transactionId": transactionId,
         "assignedTeam": assignedTeam ?? "Unassigned",
-        "teamCommission": 0.0, // Commission added only when booking is marked completed
+        "teamCommission": 0.0, // Commission calculated when marked as completed
 
         "createdAt": FieldValue.serverTimestamp(),
       };
@@ -3323,7 +3331,7 @@ class _POSScreenState extends State<POSScreen> {
                                 style: const TextStyle(fontSize: 16),
                               ),
                               Text(
-                                "Time: ${_formatTimeOfDay(context, _selectedTime)}",
+                                "Time: ${_formatTimeOfDay(context, _selectedTime ?? TimeOfDay.now())}",
                                 style: const TextStyle(fontSize: 16),
                               ),
                               if (assignedTeam != null)

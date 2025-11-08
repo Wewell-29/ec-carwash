@@ -303,9 +303,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
     return ListView.builder(
       padding: responsive.responsiveValue(
-        mobile: const EdgeInsets.all(12),
-        tablet: const EdgeInsets.all(14),
-        desktop: const EdgeInsets.all(16),
+        mobile: const EdgeInsets.fromLTRB(12, 12, 12, 80),
+        tablet: const EdgeInsets.fromLTRB(14, 14, 14, 80),
+        desktop: const EdgeInsets.fromLTRB(16, 16, 16, 80),
       ),
       itemCount: services.length,
       itemBuilder: (context, index) {
