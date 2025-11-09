@@ -45,7 +45,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     _autoCheckAndCancelExpiredBookings();
   }
 
-  /// Auto-cancel approved/pending bookings from mobile app after 30 minutes if not paid/assigned
+  /// Auto-cancel approved/pending bookings from mobile app after 10 minutes if not paid/assigned
   /// Also auto-cancel bookings that exceed team capacity limits
   Future<void> _autoCheckAndCancelExpiredBookings() async {
     try {
@@ -69,13 +69,13 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         if (scheduledDateTime != null) {
           final timeDifference = now.difference(scheduledDateTime);
 
-          // Check 1: No-show cancellation (existing logic - 30 min past scheduled)
-          if (timeDifference.inMinutes >= 30 && paymentStatus != 'paid') {
+          // Check 1: No-show cancellation (existing logic - 10 min past scheduled)
+          if (timeDifference.inMinutes >= 10 && paymentStatus != 'paid') {
             await _autoCancelBooking(
               doc.reference,
               doc.id,
               data,
-              'Auto-cancelled: No show after 30 minutes',
+              'Auto-cancelled: No show after 10 minutes',
             );
             continue;
           }
