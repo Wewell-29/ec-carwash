@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:ec_carwash/data_models/booking_data_unified.dart';
-import 'package:ec_carwash/data_models/relationship_manager.dart';
 import 'package:ec_carwash/data_models/notification_data.dart';
+import 'package:ec_carwash/data_models/unified_transaction_data.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -549,14 +549,39 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
   Future<void> _createTransactionFromBooking(Booking booking) async {
     try {
-      // Use unified system - creates transaction with all relationships
-      final transactionId =
-          await RelationshipManager.completeBookingWithTransaction(
-            booking: booking,
-            cash: booking.totalAmount,
-            change: 0.0,
-            teamCommission: 0.0,
-          );
+      final existingTransaction = await TransactionManager.getTransactionByBookingId(booking.id!);
+      if (existingTransaction != null) {
+        return;
+      }
+
+      final transactionId = await TransactionManager.createFromBooking(
+        bookingId: booking.id!,
+        customerName: booking.userName,
+        customerId: booking.customerId,
+        vehiclePlateNumber: booking.plateNumber,
+        contactNumber: booking.contactNumber,
+        vehicleType: booking.vehicleType,
+        services: booking.services
+            .map((bs) => TransactionService(
+                  serviceCode: bs.serviceCode,
+                  serviceName: bs.serviceName,
+                  vehicleType: bs.vehicleType,
+                  price: bs.price,
+                  quantity: bs.quantity,
+                ))
+            .toList(),
+        total: booking.totalAmount,
+        scheduledDateTime: booking.scheduledDateTime,
+        assignedTeam: booking.assignedTeam,
+        teamCommission: 0.0,
+      );
+
+      await FirebaseFirestore.instance
+          .collection('Bookings')
+          .doc(booking.id)
+          .update({
+            'transactionId': transactionId,
+          });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
