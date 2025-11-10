@@ -232,7 +232,42 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
       context: context,
       initialTime: _selectedTime ?? TimeOfDay.now(),
     );
-    if (picked != null) setState(() => _selectedTime = picked);
+
+    if (picked != null) {
+      // Validate time is between 7:00 AM and 5:30 PM
+      final hour = picked.hour;
+      final minute = picked.minute;
+      final totalMinutes = hour * 60 + minute;
+      final startMinutes = 7 * 60; // 7:00 AM = 420 minutes
+      final endMinutes = 17 * 60 + 30; // 5:30 PM = 1050 minutes
+
+      if (totalMinutes < startMinutes || totalMinutes > endMinutes) {
+        if (mounted) {
+          await showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Invalid Time'),
+              content: const Text(
+                'Booking times are only accepted from 7:00 AM to 5:30 PM.\n\nPlease select a time within our operating hours.',
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.yellow[700],
+                    foregroundColor: Colors.black,
+                  ),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+
+      setState(() => _selectedTime = picked);
+    }
   }
 
   DateTime? _combinedSelectedDateTime() {
@@ -244,6 +279,50 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
       _selectedTime!.hour,
       _selectedTime!.minute,
     );
+  }
+
+  // Round time to nearest 30-minute slot
+  DateTime _roundToNearestSlot(DateTime dateTime) {
+    final minute = dateTime.minute;
+    final roundedMinute = minute < 30 ? 0 : 30;
+    return DateTime(
+      dateTime.year,
+      dateTime.month,
+      dateTime.day,
+      dateTime.hour,
+      roundedMinute,
+    );
+  }
+
+  // Check if slot is available (max 2 bookings per 30-min slot)
+  Future<bool> _isSlotAvailable(DateTime scheduledDateTime) async {
+    try {
+      final slotStart = _roundToNearestSlot(scheduledDateTime);
+      final slotEnd = slotStart.add(const Duration(minutes: 30));
+
+      // Query bookings in this time slot
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('scheduledDateTime', isGreaterThanOrEqualTo: Timestamp.fromDate(slotStart))
+          .where('scheduledDateTime', isLessThan: Timestamp.fromDate(slotEnd))
+          .get();
+
+      // Only count approved bookings with assigned teams
+      final reservedSlots = querySnapshot.docs.where((doc) {
+        final data = doc.data();
+        final status = data['status'] as String?;
+        final assignedTeam = data['assignedTeam'] as String?;
+
+        // Only count if booking is approved AND has an assigned team
+        return status == 'approved' && assignedTeam != null && assignedTeam.isNotEmpty;
+      }).toList();
+
+      // Check if there are less than 2 reserved slots (2 teams available)
+      return reservedSlots.length < 2;
+    } catch (e) {
+      debugPrint('Error checking slot availability: $e');
+      return true; // Allow booking if check fails
+    }
   }
 
   // --- SUBMIT BOOKING (UNIFIED) ---
@@ -262,6 +341,24 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
       return;
     }
 
+    // Final validation: Ensure time is between 7:00 AM and 5:30 PM
+    final hour = _selectedTime!.hour;
+    final minute = _selectedTime!.minute;
+    final totalMinutes = hour * 60 + minute;
+    final startMinutes = 7 * 60; // 7:00 AM = 420 minutes
+    final endMinutes = 17 * 60 + 30; // 5:30 PM = 1050 minutes
+
+    if (totalMinutes < startMinutes || totalMinutes > endMinutes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Booking time must be between 7:00 AM and 5:30 PM'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -272,10 +369,44 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
       return;
     }
 
+    final selectedDateTime = _combinedSelectedDateTime()!;
+
     setState(() => _isLoading = true);
 
+    // Check slot availability
+    final slotAvailable = await _isSlotAvailable(selectedDateTime);
+
+    if (!slotAvailable) {
+      setState(() => _isLoading = false);
+      final slotTime = _roundToNearestSlot(selectedDateTime);
+      final formatter = DateFormat('h:mm a');
+      final slotTimeStr = formatter.format(slotTime);
+
+      if (mounted) {
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Slot Full'),
+            content: Text(
+              'The $slotTimeStr time slot is fully booked (2/2 teams occupied).\n\nPlease select a different time slot.',
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.yellow[700],
+                  foregroundColor: Colors.black,
+                ),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
     try {
-      final selectedDateTime = _combinedSelectedDateTime()!;
 
       // Convert cart to BookingService list
       final services = _cart.map((item) => BookingService(
@@ -333,10 +464,10 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
   }
 
   // --- SHOW CART (bottom sheet) ---
-  void _showCart() {
+  Future<void> _showCart() async {
     final total = _cart.fold<int>(0, (sum, item) => sum + item.price);
 
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
@@ -401,7 +532,9 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
                                     color: Colors.red,
                                   ),
                                   onPressed: () {
-                                    _removeFromCart(item);
+                                    setState(() {
+                                      _removeFromCart(item);
+                                    });
                                     // Auto-refresh the sheet to reflect changes immediately
                                     Navigator.pop(context);
                                     _showCart();
@@ -652,6 +785,9 @@ class _BookServiceScreenState extends State<BookServiceScreen> {
         );
       },
     );
+
+    // Trigger rebuild after modal closes
+    setState(() {});
   }
 
   // --- Drawer navigation helper ---
@@ -1158,7 +1294,7 @@ class VehicleServicesScreen extends StatefulWidget {
   final String vehicleType;
   final bool Function(String, String, int) onAddToCart;
   final List<CartItem> cart;
-  final VoidCallback showCart;
+  final Future<void> Function() showCart;
   final Map<String, Map<String, dynamic>> productsData;
 
   const VehicleServicesScreen({
@@ -1228,7 +1364,10 @@ class _VehicleServicesScreenState extends State<VehicleServicesScreen> {
             children: [
               IconButton(
                 icon: const Icon(Icons.shopping_cart),
-                onPressed: widget.showCart,
+                onPressed: () async {
+                  await widget.showCart();
+                  setState(() {}); // Rebuild to update badge
+                },
               ),
               if (widget.cart.isNotEmpty)
                 Positioned(

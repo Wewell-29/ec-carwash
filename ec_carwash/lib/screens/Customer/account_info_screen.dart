@@ -53,6 +53,12 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
         types.addAll(service.prices.keys);
       }
 
+      // Filter out "Standard" and "Premium"
+      types.removeWhere(
+        (type) =>
+            type.toLowerCase() == 'standard' || type.toLowerCase() == 'premium',
+      );
+
       setState(() {
         _availableVehicleTypes = types.toList()..sort();
       });
@@ -186,10 +192,7 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
             children: [
               const Text('• ', style: TextStyle(fontSize: 16)),
               Expanded(
-                child: Text(
-                  motorcycle,
-                  style: const TextStyle(fontSize: 14),
-                ),
+                child: Text(motorcycle, style: const TextStyle(fontSize: 14)),
               ),
             ],
           ),
@@ -281,8 +284,10 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                         labelText: 'Contact Number *',
                         border: OutlineInputBorder(),
                         hintText: '09XXXXXXXXX',
+                        helperText: 'Must be exactly 11 digits',
                       ),
                       keyboardType: TextInputType.phone,
+                      maxLength: 11,
                     ),
                     const SizedBox(height: 16),
                     Row(
@@ -334,6 +339,20 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text('Please fill in all fields'),
+                                backgroundColor: Colors.orange,
+                              ),
+                            );
+                            return;
+                          }
+
+                          // Validate contact number is exactly 11 digits
+                          if (contact.length != 11 ||
+                              !RegExp(r'^\d{11}$').hasMatch(contact)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Contact number must be exactly 11 digits',
+                                ),
                                 backgroundColor: Colors.orange,
                               ),
                             );
@@ -435,8 +454,10 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
               labelText: 'Contact Number',
               border: OutlineInputBorder(),
               hintText: '09XXXXXXXXX',
+              helperText: 'Must be exactly 11 digits',
             ),
             keyboardType: TextInputType.phone,
+            maxLength: 11,
           ),
           actions: [
             TextButton(
@@ -450,6 +471,18 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Contact number cannot be empty'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                  return;
+                }
+
+                // Validate contact number is exactly 11 digits
+                if (newContact.length != 11 ||
+                    !RegExp(r'^\d{11}$').hasMatch(newContact)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Contact number must be exactly 11 digits'),
                       backgroundColor: Colors.orange,
                     ),
                   );
@@ -511,28 +544,6 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            Future<void> validate(String value) async {
-              final plate = value.trim().toUpperCase();
-              if (plate.isEmpty) {
-                setDialogState(() => errorText = 'Plate number is required');
-                return;
-              }
-              // If unchanged, it's valid
-              if (plate == vehicle.plateNumber.toUpperCase()) {
-                setDialogState(() => errorText = null);
-                return;
-              }
-              setDialogState(() {
-                checking = true;
-                errorText = null;
-              });
-              final unique = await _isPlateNumberUnique(plate);
-              setDialogState(() {
-                checking = false;
-                errorText = unique ? null : 'This plate number is already registered';
-              });
-            }
-
             return AlertDialog(
               title: const Text('Edit Plate Number'),
               content: Column(
@@ -552,6 +563,7 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                     },
                   ),
                   if (checking)
+                    // ignore: dead_code
                     const Padding(
                       padding: EdgeInsets.only(top: 8.0),
                       child: LinearProgressIndicator(minHeight: 2),
@@ -580,7 +592,9 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                       if (!unique) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text('This plate number is already registered'),
+                            content: Text(
+                              'This plate number is already registered',
+                            ),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -637,7 +651,9 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Vehicle'),
-        content: Text('Remove ${vehicle.plateNumber} from your account? This cannot be undone.'),
+        content: Text(
+          'Remove ${vehicle.plateNumber} from your account? This cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -663,7 +679,10 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
     if (vehicle.id == null) return;
     setState(() => _isLoading = true);
     try {
-      await FirebaseFirestore.instance.collection('Customers').doc(vehicle.id).delete();
+      await FirebaseFirestore.instance
+          .collection('Customers')
+          .doc(vehicle.id)
+          .delete();
       await _loadUserVehicles();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

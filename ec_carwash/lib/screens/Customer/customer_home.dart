@@ -84,6 +84,57 @@ class _CustomerHomeState extends State<CustomerHome> {
     }
   }
 
+  Future<void> _cancelBooking(String bookingId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel Booking'),
+        content: const Text('Are you sure you want to cancel this booking?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Yes, Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('Bookings')
+            .doc(bookingId)
+            .update({'status': 'cancelled'});
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Booking cancelled successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error cancelling booking: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -264,53 +315,78 @@ class _CustomerHomeState extends State<CustomerHome> {
                 borderRadius: BorderRadius.circular(12),
               ),
               elevation: 3,
-              child: ListTile(
-                title: Text("Plate: $plate"),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("Date: $formattedDateTime"),
-                    const SizedBox(height: 4),
-                    Text(
-                      services.isNotEmpty
-                          ? "Services: ${services.map((s) => (s as Map<String, dynamic>)["serviceName"] ?? "").join(", ")}"
-                          : "Services: N/A",
+              child: Column(
+                children: [
+                  ListTile(
+                    title: Text("Plate: $plate"),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Date: $formattedDateTime"),
+                        const SizedBox(height: 4),
+                        Text(
+                          services.isNotEmpty
+                              ? "Services: ${services.map((s) => (s as Map<String, dynamic>)["serviceName"] ?? "").join(", ")}"
+                              : "Services: N/A",
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Chip(
-                      label: Text(
-                        status.toUpperCase(),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Chip(
+                          label: Text(
+                            status.toUpperCase(),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          backgroundColor: status == "approved"
+                              ? Colors.green
+                              : Colors.orange,
+                        ),
+                        if (status == 'pending') ...[
+                          const SizedBox(width: 4),
+                          const Icon(Icons.arrow_forward_ios, size: 16),
+                        ],
+                      ],
+                    ),
+                    onTap: () async {
+                      if (status == 'pending') {
+                        final docId = bookings[index].id;
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ReservationDetailScreen(
+                              bookingId: docId,
+                              initialData: booking,
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                  if (status == 'approved')
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            final docId = bookings[index].id;
+                            _cancelBooking(docId);
+                          },
+                          icon: const Icon(Icons.cancel, size: 18),
+                          label: const Text('Cancel Booking'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red[600],
+                            foregroundColor: Colors.white,
+                          ),
                         ),
                       ),
-                      backgroundColor: status == "approved"
-                          ? Colors.green
-                          : Colors.orange,
                     ),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.arrow_forward_ios, size: 16),
-                  ],
-                ),
-                onTap: () async {
-                  if (status == 'pending') {
-                    final docId = bookings[index].id;
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ReservationDetailScreen(
-                          bookingId: docId,
-                          initialData: booking,
-                        ),
-                      ),
-                    );
-                  }
-                },
+                ],
               ),
             );
           },
