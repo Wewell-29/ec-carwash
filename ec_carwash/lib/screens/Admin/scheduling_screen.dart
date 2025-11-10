@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:ec_carwash/data_models/booking_data_unified.dart';
-import 'package:ec_carwash/data_models/relationship_manager.dart';
 import 'package:ec_carwash/data_models/notification_data.dart';
+import 'package:ec_carwash/data_models/unified_transaction_data.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -25,49 +25,9 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
   @override
   void initState() {
     super.initState();
-    _debugCheckBookings(); // Debug: Check what bookings exist
     _loadBookings();
-    _fixExistingPOSBookingsPaymentStatus(); // Fix existing POS bookings
-    _startAutoCancelTimer(); // Start auto-cancel timer
-  }
-
-  /// Debug function to check what bookings exist in Firestore
-  Future<void> _debugCheckBookings() async {
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('Bookings')
-          .limit(5)
-          .get();
-
-      debugPrint(
-        '🔍 DEBUG: Total bookings in Firestore: ${snapshot.docs.length}',
-      );
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        debugPrint('  📄 Booking ${doc.id}:');
-        debugPrint(
-          '    - hasScheduledDateTime: ${data.containsKey('scheduledDateTime')}',
-        );
-        debugPrint(
-          '    - hasSelectedDateTime: ${data.containsKey('selectedDateTime')}',
-        );
-        debugPrint('    - status: ${data['status']}');
-        debugPrint('    - source: ${data['source']}');
-        debugPrint('    - userName: ${data['userName']}');
-        if (data.containsKey('scheduledDateTime')) {
-          debugPrint(
-            '    - scheduledDateTime: ${(data['scheduledDateTime'] as Timestamp).toDate()}',
-          );
-        }
-        if (data.containsKey('selectedDateTime')) {
-          debugPrint(
-            '    - selectedDateTime: ${(data['selectedDateTime'] as Timestamp).toDate()}',
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Debug check failed: $e');
-    }
+    _fixExistingPOSBookingsPaymentStatus();
+    _startAutoCancelTimer();
   }
 
   @override
@@ -85,7 +45,7 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
     _autoCheckAndCancelExpiredBookings();
   }
 
-  /// Auto-cancel approved/pending bookings from mobile app after 30 minutes if not paid/assigned
+  /// Auto-cancel approved/pending bookings from mobile app after 10 minutes if not paid/assigned
   /// Also auto-cancel bookings that exceed team capacity limits
   Future<void> _autoCheckAndCancelExpiredBookings() async {
     try {
@@ -109,13 +69,13 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         if (scheduledDateTime != null) {
           final timeDifference = now.difference(scheduledDateTime);
 
-          // Check 1: No-show cancellation (existing logic - 30 min past scheduled)
-          if (timeDifference.inMinutes >= 30 && paymentStatus != 'paid') {
+          // Check 1: No-show cancellation (existing logic - 10 min past scheduled)
+          if (timeDifference.inMinutes >= 10 && paymentStatus != 'paid') {
             await _autoCancelBooking(
               doc.reference,
               doc.id,
               data,
-              'Auto-cancelled: No show after 30 minutes',
+              'Auto-cancelled: No show after 10 minutes',
             );
             continue;
           }
@@ -146,12 +106,10 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         }
       }
 
-      // Reload bookings to reflect changes
       if (mounted) {
         _loadBookings();
       }
     } catch (e) {
-      debugPrint('Error in auto-cancel check: $e');
     }
   }
 
@@ -182,16 +140,13 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         );
       }
 
-      debugPrint('Auto-cancelled booking $bookingId - $reason');
     } catch (e) {
-      debugPrint('Error auto-cancelling booking $bookingId: $e');
     }
   }
 
   Future<void> _loadBookings() async {
     setState(() => _isLoading = true);
     try {
-      debugPrint('🔍 Loading bookings with filter: $_selectedFilter');
       List<Booking> allBookings = [];
       if (_selectedFilter == 'today') {
         allBookings = await BookingManager.getTodayBookings();
@@ -199,35 +154,14 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         allBookings = await BookingManager.getAllBookings();
       }
 
-      debugPrint('📊 Total bookings loaded: ${allBookings.length}');
-      for (var booking in allBookings) {
-        debugPrint(
-          '  - ${booking.status}: ${booking.userName} (${booking.source}) - ${booking.scheduledDateTime}',
-        );
-      }
-
-      // Separate bookings by status for Kanban columns
       setState(() {
-        _pendingBookings = allBookings
-            .where((b) => b.status == 'pending')
-            .toList();
-        _approvedBookings = allBookings
-            .where((b) => b.status == 'approved')
-            .toList();
-        _completedBookings = allBookings
-            .where((b) => b.status == 'completed')
-            .toList();
-        _cancelledBookings = allBookings
-            .where((b) => b.status == 'cancelled')
-            .toList();
+        _pendingBookings = allBookings.where((b) => b.status == 'pending').toList();
+        _approvedBookings = allBookings.where((b) => b.status == 'approved').toList();
+        _completedBookings = allBookings.where((b) => b.status == 'completed').toList();
+        _cancelledBookings = allBookings.where((b) => b.status == 'cancelled').toList();
         _isLoading = false;
-
-        debugPrint(
-          '✅ Pending: ${_pendingBookings.length}, Approved: ${_approvedBookings.length}, Completed: ${_completedBookings.length}, Cancelled: ${_cancelledBookings.length}',
-        );
       });
     } catch (e) {
-      debugPrint('❌ Error loading bookings: $e');
       setState(() {
         _pendingBookings = [];
         _approvedBookings = [];
@@ -511,13 +445,12 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
         await FirebaseFirestore.instance
             .collection('Bookings')
             .doc(bookingId)
-            .update({'teamCommission': commission});
+            .update({
+              'teamCommission': commission,
+            });
 
-        // Only create transaction if it doesn't already exist
-        // Transaction is now created when marking as paid, not at completion
-        if (booking.source != 'pos' && booking.transactionId == null) {
-          await _createTransactionFromBooking(booking);
-        }
+        // Transaction should already exist from payment step
+        // No need to create transaction here
       }
 
       await _loadBookings(); // Refresh the list
@@ -580,24 +513,27 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
       if (confirmed != true) return;
 
-      // Update payment status to 'paid'
+      // Update payment status to 'paid' and change status to 'approved'
       await FirebaseFirestore.instance
           .collection('Bookings')
           .doc(booking.id)
           .update({
             'paymentStatus': 'paid',
+            'status': 'approved',
             'updatedAt': FieldValue.serverTimestamp(),
           });
 
-      // Create transaction immediately when paid
-      await _createTransactionFromBooking(booking);
+      // Create transaction when payment is confirmed
+      if (booking.source == 'customer-app' && booking.transactionId == null) {
+        await _createTransactionFromBooking(booking);
+      }
 
       await _loadBookings();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Booking marked as paid and transaction created'),
+            content: Text('Payment confirmed. Transaction created and booking moved to Approved.'),
             backgroundColor: Colors.green,
           ),
         );
@@ -613,14 +549,39 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
   Future<void> _createTransactionFromBooking(Booking booking) async {
     try {
-      // Use unified system - creates transaction with all relationships
-      final transactionId =
-          await RelationshipManager.completeBookingWithTransaction(
-            booking: booking,
-            cash: booking.totalAmount,
-            change: 0.0,
-            teamCommission: 0.0,
-          );
+      final existingTransaction = await TransactionManager.getTransactionByBookingId(booking.id!);
+      if (existingTransaction != null) {
+        return;
+      }
+
+      final transactionId = await TransactionManager.createFromBooking(
+        bookingId: booking.id!,
+        customerName: booking.userName,
+        customerId: booking.customerId,
+        vehiclePlateNumber: booking.plateNumber,
+        contactNumber: booking.contactNumber,
+        vehicleType: booking.vehicleType,
+        services: booking.services
+            .map((bs) => TransactionService(
+                  serviceCode: bs.serviceCode,
+                  serviceName: bs.serviceName,
+                  vehicleType: bs.vehicleType,
+                  price: bs.price,
+                  quantity: bs.quantity,
+                ))
+            .toList(),
+        total: booking.totalAmount,
+        scheduledDateTime: booking.scheduledDateTime,
+        assignedTeam: booking.assignedTeam,
+        teamCommission: 0.0,
+      );
+
+      await FirebaseFirestore.instance
+          .collection('Bookings')
+          .doc(booking.id)
+          .update({
+            'transactionId': transactionId,
+          });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -662,10 +623,8 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
 
       if (updateCount > 0) {
         await batch.commit();
-        debugPrint('Fixed payment status for $updateCount POS bookings');
       }
     } catch (e) {
-      debugPrint('Error fixing POS booking payment status: $e');
     }
   }
 
@@ -691,14 +650,12 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
               ],
             ),
           ),
-          // Kanban Board with 4 columns
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Pending Column
                       Expanded(
                         child: _buildKanbanColumn(
                           'Pending Approval',
@@ -708,7 +665,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      // Approved Column
                       Expanded(
                         child: _buildKanbanColumn(
                           'Approved',
@@ -718,7 +674,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      // Completed Column
                       Expanded(
                         child: _buildKanbanColumn(
                           'Completed',
@@ -728,7 +683,6 @@ class _SchedulingScreenState extends State<SchedulingScreen> {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      // Cancelled Column
                       Expanded(
                         child: _buildKanbanColumn(
                           'Cancelled',

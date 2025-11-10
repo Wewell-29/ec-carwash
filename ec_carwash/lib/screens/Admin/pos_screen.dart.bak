@@ -23,19 +23,19 @@ class _POSScreenState extends State<POSScreen> {
   String? _currentCustomerId;
   String? _vehicleTypeForCustomer; // ← use this; if null we’ll ask once
 
-
+  // Controllers for customer form
   final TextEditingController nameController = TextEditingController();
   final TextEditingController plateController = TextEditingController();
   final TextEditingController emailController = TextEditingController();
   final TextEditingController phoneController = TextEditingController();
 
-
+  // Vehicle type for the customer form
   String? _selectedVehicleType;
 
+  // Time picker state (defaults to now)
+  TimeOfDay _selectedTime = TimeOfDay.now();
 
-  TimeOfDay? _selectedTime;
-
-
+  // UI state for showing new customer form
   bool _showNewCustomerForm = false;
 
   String _formatTimeOfDay(BuildContext ctx, TimeOfDay tod) {
@@ -53,9 +53,9 @@ class _POSScreenState extends State<POSScreen> {
   bool _hasSearched = false;
   List<Customer> _searchResults = <Customer>[];
   List<Customer> get searchResults => _searchResults;
-  String _searchType = 'plate';
+  String _searchType = 'plate'; // 'plate' or 'name'
 
-
+  // Services data
   List<Service> _services = [];
   bool _isLoadingServices = true;
 
@@ -75,6 +75,7 @@ class _POSScreenState extends State<POSScreen> {
       });
     } catch (e) {
       setState(() => _isLoadingServices = false);
+      debugPrint('Error loading services: $e');
     }
   }
 
@@ -227,6 +228,7 @@ class _POSScreenState extends State<POSScreen> {
         _selectedVehicleType = _vehicleTypeForCustomer;
       });
     } catch (e) {
+      debugPrint('Failed to load customer by plate: $e');
     }
   }
 
@@ -275,6 +277,7 @@ class _POSScreenState extends State<POSScreen> {
         isSearching = false;
         _hasSearched = true;
       });
+      debugPrint('Search failed: $e');
     }
   }
 
@@ -349,7 +352,7 @@ class _POSScreenState extends State<POSScreen> {
         vehicleType: _selectedVehicleType,
       );
 
-      
+      // ⬇️ Use the upsert-by-plate logic (update if exists, create if not)
       final customerId = await _saveOrUpdateCustomerByPlate(base);
 
       setState(() {
@@ -413,7 +416,7 @@ class _POSScreenState extends State<POSScreen> {
     _showVehicleTypeDialog(code); // ask only if not saved
   }
 
-  
+  // ⬇️ Dialog now has NO checkbox; it only lets user pick once when none is saved
   void _showVehicleTypeDialog(String code) {
     final product = servicesData[code];
     if (product == null) return;
@@ -423,90 +426,55 @@ class _POSScreenState extends State<POSScreen> {
 
     showDialog(
       context: context,
-      builder: (context) {
-        final responsive = context.responsive;
-        return Dialog(
-          insetPadding: EdgeInsets.symmetric(
-            horizontal: responsive.isMobile ? 16 : 40,
-            vertical: 24,
-          ),
-          child: Container(
-            width: responsive.responsiveValue(
-              mobile: responsive.width * 0.9,
-              tablet: 400,
-              desktop: 450,
-            ),
-            constraints: BoxConstraints(
-              maxHeight: responsive.height * 0.7,
-            ),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black87, width: 1.5),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Add $code to Cart',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text('Choose the vehicle type for pricing:'),
-                const SizedBox(height: 16),
-                Flexible(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: priceEntries.map((entry) {
-                        final vehicleType = entry.key;
-                        final price = (entry.value as num).toDouble();
-                        IconData icon = Icons.directions_car;
-                        Color color = Colors.yellow.shade700;
+      builder: (context) => AlertDialog(
+        title: Text('Add $code to Cart'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Choose the vehicle type for pricing:'),
+              const SizedBox(height: 16),
+              ...priceEntries.map((entry) {
+                final vehicleType = entry.key;
+                final price = (entry.value as num).toDouble();
+                IconData icon = Icons.directions_car;
+                Color color = Colors.yellow.shade700;
 
-                        if (vehicleType.contains('Motorcycle')) {
-                          icon = Icons.motorcycle;
-                          color = Colors.green;
-                        } else if (vehicleType.contains('Truck')) {
-                          icon = Icons.local_shipping;
-                          color = Colors.red;
-                        } else if (vehicleType.contains('Van') ||
-                            vehicleType.contains('SUV')) {
-                          icon = Icons.airport_shuttle;
-                          color = Colors.orange;
-                        } else if (vehicleType.contains('Tricycle')) {
-                          icon = Icons.pedal_bike;
-                          color = Colors.purple;
-                        }
+                if (vehicleType.contains('Motorcycle')) {
+                  icon = Icons.motorcycle;
+                  color = Colors.green;
+                } else if (vehicleType.contains('Truck')) {
+                  icon = Icons.local_shipping;
+                  color = Colors.red;
+                } else if (vehicleType.contains('Van') ||
+                    vehicleType.contains('SUV')) {
+                  icon = Icons.airport_shuttle;
+                  color = Colors.orange;
+                } else if (vehicleType.contains('Tricycle')) {
+                  icon = Icons.pedal_bike;
+                  color = Colors.purple;
+                }
 
-                        return ListTile(
-                          leading: Icon(icon, color: color),
-                          title: Text(vehicleType),
-                          subtitle: Text('₱${price.toStringAsFixed(2)}'),
-                          onTap: () async {
-                            Navigator.pop(context);
-                            await _addSingleCodeToCart(
-                              code,
-                              vehicleType,
-                              price,
-                              remember: true,
-                            );
-                          },
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+                return ListTile(
+                  leading: Icon(icon, color: color),
+                  title: Text(vehicleType),
+                  subtitle: Text('₱${price.toStringAsFixed(2)}'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    // Remember automatically the first time (since nothing saved yet)
+                    await _addSingleCodeToCart(
+                      code,
+                      vehicleType,
+                      price,
+                      remember: true,
+                    );
+                  },
+                );
+              }),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -524,68 +492,44 @@ class _POSScreenState extends State<POSScreen> {
 
     showDialog(
       context: context,
-      builder: (context) {
-        final responsive = context.responsive;
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final pricePerPanel = selectedQuality == 'Standard' ? standardPrice : premiumPrice;
-            final totalPrice = pricePerPanel * selectedPanels;
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final pricePerPanel = selectedQuality == 'Standard' ? standardPrice : premiumPrice;
+          final totalPrice = pricePerPanel * selectedPanels;
 
-            return Dialog(
-              insetPadding: EdgeInsets.symmetric(
-                horizontal: responsive.isMobile ? 16 : 40,
-                vertical: 24,
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.black87, width: 2),
+            ),
+            title: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.yellow.shade700, Colors.yellow.shade800],
+                ),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.black87, width: 1),
               ),
-              child: Container(
-                width: responsive.responsiveValue(
-                  mobile: responsive.width * 0.9,
-                  tablet: 450,
-                  desktop: 500,
-                ),
-                constraints: BoxConstraints(
-                  maxHeight: responsive.height * 0.8,
-                ),
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.black87, width: 2),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Colors.yellow.shade700, Colors.yellow.shade800],
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.black87, width: 1),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.format_paint, color: Colors.black87, size: 24),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Repaint Service',
-                            style: TextStyle(
-                              color: Colors.black87,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ],
-                      ),
+              child: Row(
+                children: [
+                  Icon(Icons.format_paint, color: Colors.black87, size: 24),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Repaint Service',
+                    style: TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
                     ),
-                    const SizedBox(height: 20),
-                    Flexible(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
+                  ),
+                ],
+              ),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 // Quality Selection
                 const Text(
                   'Select Quality:',
@@ -846,87 +790,75 @@ class _POSScreenState extends State<POSScreen> {
                     ],
                   ),
                 ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text(
-                              'Cancel',
-                              style: TextStyle(color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              Navigator.pop(context);
-
-                              final existingIndex = cart.indexWhere((item) => item["code"] == 'RPT');
-                              if (existingIndex >= 0) {
-                                setState(() {
-                                  cart[existingIndex]["quantity"] = selectedPanels;
-                                  cart[existingIndex]["price"] = pricePerPanel;
-                                  cart[existingIndex]["category"] = selectedQuality;
-                                });
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Updated: $selectedQuality - $selectedPanels panel(s)'),
-                                      backgroundColor: Colors.yellow.shade700,
-                                    ),
-                                  );
-                                }
-                              } else {
-                                setState(() {
-                                  cart.add({
-                                    "code": 'RPT',
-                                    "name": product["name"],
-                                    "category": selectedQuality,
-                                    "price": pricePerPanel,
-                                    "quantity": selectedPanels,
-                                  });
-                                });
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Added: $selectedQuality Repaint - $selectedPanels panel(s)'),
-                                      backgroundColor: Colors.yellow.shade700,
-                                    ),
-                                  );
-                                }
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.yellow.shade700,
-                              foregroundColor: Colors.black87,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: const Text(
-                              'Add to Cart',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.black87),
                 ),
               ),
-            );
-          },
-        );
-      },
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+
+                  // Check if repaint already exists in cart
+                  final existingIndex = cart.indexWhere((item) => item["code"] == 'RPT');
+                  if (existingIndex >= 0) {
+                    // Update quantity and price
+                    setState(() {
+                      cart[existingIndex]["quantity"] = selectedPanels;
+                      cart[existingIndex]["price"] = pricePerPanel;
+                      cart[existingIndex]["category"] = selectedQuality;
+                    });
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Updated: $selectedQuality - $selectedPanels panel(s)'),
+                          backgroundColor: Colors.yellow.shade700,
+                        ),
+                      );
+                    }
+                  } else {
+                    // Add new repaint service
+                    setState(() {
+                      cart.add({
+                        "code": 'RPT',
+                        "name": product["name"],
+                        "category": selectedQuality,
+                        "price": pricePerPanel,
+                        "quantity": selectedPanels,
+                      });
+                    });
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Added: $selectedQuality Repaint - $selectedPanels panel(s)'),
+                          backgroundColor: Colors.yellow.shade700,
+                        ),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.yellow.shade700,
+                  foregroundColor: Colors.black87,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Add to Cart',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -996,8 +928,9 @@ class _POSScreenState extends State<POSScreen> {
       body: SafeArea(
         child: Row(
           children: [
+            // Product Codes Grid
             Expanded(
-              flex: responsive.isTablet ? 4 : 5,
+              flex: responsive.isTablet ? 5 : 6,
               child: OrientationBuilder(
                 builder: (context, orientation) {
                   return GridView.builder(
@@ -1014,8 +947,8 @@ class _POSScreenState extends State<POSScreen> {
                       final product = servicesData[code];
                       if (product == null) return const SizedBox();
 
-
-
+                      // Check if service is applicable for current vehicle type
+                      // Exception: RPT/EC16 (Repaint) uses Standard/Premium pricing, always applicable
                       final prices = product["prices"] as Map<String, dynamic>;
                       final bool isApplicable = code == 'RPT' || code == 'EC16' ||
                                                _vehicleTypeForCustomer == null ||
@@ -1033,7 +966,7 @@ class _POSScreenState extends State<POSScreen> {
                             highlightColor: isApplicable ? Colors.yellow.shade100 : null,
                             child: Container(
                               decoration: BoxDecoration(
-
+                                // Modern gradient with brand colors
                                 gradient: LinearGradient(
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
@@ -1045,12 +978,12 @@ class _POSScreenState extends State<POSScreen> {
                                   stops: const [0.0, 0.5, 1.0],
                                 ),
                                 borderRadius: BorderRadius.circular(12),
-
+                                // Thin black stroke as requested
                                 border: Border.all(
                                   color: Colors.black87,
                                   width: 1.0,
                                 ),
-
+                                // Enhanced shadow for depth
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.black.withValues(alpha: 0.08),
@@ -1069,7 +1002,7 @@ class _POSScreenState extends State<POSScreen> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-
+                                    // Service code chip with brand styling
                                     Container(
                                       padding: EdgeInsets.symmetric(
                                         horizontal: responsive.isTablet ? 8 : 12,
@@ -1108,7 +1041,7 @@ class _POSScreenState extends State<POSScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 6),
-
+                                    // Service name and description with better typography
                                     Expanded(
                                       child: Column(
                                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1123,25 +1056,9 @@ class _POSScreenState extends State<POSScreen> {
                                               height: 1.2,
                                               letterSpacing: 0.2,
                                             ),
-                                            maxLines: responsive.isDesktop ? 2 : 3,
+                                            maxLines: 3,
                                             overflow: TextOverflow.ellipsis,
                                           ),
-                                          if (responsive.isDesktop && product["description"] != null && (product["description"] as String).isNotEmpty) ...[
-                                            const SizedBox(height: 4),
-                                            Flexible(
-                                              child: Text(
-                                                product["description"],
-                                                textAlign: TextAlign.center,
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: Colors.grey.shade600,
-                                                  height: 1.2,
-                                                ),
-                                                maxLines: 4,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                          ],
                                         ],
                                       ),
                                     ),
@@ -1173,11 +1090,11 @@ class _POSScreenState extends State<POSScreen> {
               ),
             ),
 
-
-            if (responsive.width > 700)
-              Expanded(
-                flex: responsive.isTablet ? 4 : 3,
-                child: Column(
+        // Side panel
+        if (responsive.width > 700)
+          Expanded(
+            flex: responsive.isTablet ? 3 : 2,
+            child: Column(
               children: [
                 // Dynamic sizing based on search state
                 Expanded(
@@ -1198,14 +1115,11 @@ class _POSScreenState extends State<POSScreen> {
   }
 
   Widget _buildCustomerForm() {
-    final responsive = context.responsive;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isTablet = screenWidth > 600 && screenWidth <= 1024;
 
     return Container(
-      padding: responsive.responsiveValue(
-        mobile: const EdgeInsets.all(12),
-        tablet: const EdgeInsets.all(14),
-        desktop: const EdgeInsets.all(16),
-      ),
+      padding: EdgeInsets.all(isTablet ? 12 : 16), // Smaller padding for tablets
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1218,7 +1132,7 @@ class _POSScreenState extends State<POSScreen> {
                   "Customer Information",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: responsive.fontSize(mobile: 16, tablet: 17, desktop: 18),
+                    fontSize: isTablet ? 16 : 18,
                     color: Theme.of(context).colorScheme.secondary,
                   ),
                 ),
@@ -1233,9 +1147,9 @@ class _POSScreenState extends State<POSScreen> {
             const SizedBox(height: 12),
 
             if (!_showNewCustomerForm) ...[
-
+              // Show selected customer or search mode
               if (currentCustomer != null || _currentCustomerId != null) ...[
-
+                // Selected Customer Display
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -1964,7 +1878,7 @@ class _POSScreenState extends State<POSScreen> {
 
             // Service Time (always visible and separate from customer data)
             Container(
-              padding: EdgeInsets.all(responsive.isTablet ? 10 : 12),
+              padding: EdgeInsets.all(isTablet ? 10 : 12),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [Colors.yellow.shade50, Colors.white],
@@ -1986,26 +1900,23 @@ class _POSScreenState extends State<POSScreen> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.access_time, size: 18, color: Colors.black87),
+                  Icon(Icons.access_time, size: 18, color: Colors.blue.shade700),
                   const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      "Service Time: ${_selectedTime != null ? _formatTimeOfDay(context, _selectedTime!) : '--:--'}",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+                  Text(
+                    "Service Time: ${_formatTimeOfDay(context, _selectedTime)}",
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue.shade700,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const Spacer(),
                   TextButton.icon(
                     icon: const Icon(Icons.edit, size: 16),
                     label: const Text("Change"),
                     onPressed: () async {
                       final picked = await showTimePicker(
                         context: context,
-                        initialTime: _selectedTime ?? TimeOfDay.now(),
+                        initialTime: _selectedTime,
                       );
                       if (picked != null) {
                         // Prevent selecting past time
@@ -2031,9 +1942,7 @@ class _POSScreenState extends State<POSScreen> {
                           return;
                         }
 
-                        setState(() {
-                          _selectedTime = picked;
-                        });
+                        setState(() => _selectedTime = picked);
                       }
                     },
                     style: TextButton.styleFrom(
@@ -2076,41 +1985,38 @@ class _POSScreenState extends State<POSScreen> {
   }
 
   Widget _buildCart() {
-    final responsive = context.responsive;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isTablet = screenWidth > 600 && screenWidth <= 1024;
 
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.yellow.shade50,
-                Colors.white,
-              ],
-            ),
-            border: Border.all(color: Colors.black87, width: 1),
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(12),
-              topRight: Radius.circular(12),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.1),
-                blurRadius: 8,
-                offset: const Offset(0, -2),
-              ),
-            ],
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.yellow.shade50,
+            Colors.white,
+          ],
+        ),
+        border: Border.all(color: Colors.black87, width: 1),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(12),
+          topRight: Radius.circular(12),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+        ],
+      ),
+      child: Column(
+        children: [
           // Cart header with theme styling
           Container(
             width: double.infinity,
-            padding: EdgeInsets.all(responsive.isTablet ? 10 : 12),
+            padding: EdgeInsets.all(isTablet ? 10 : 12),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [Colors.yellow.shade700, Colors.yellow.shade800],
@@ -2128,14 +2034,14 @@ class _POSScreenState extends State<POSScreen> {
                 Icon(
                   Icons.shopping_cart,
                   color: Colors.black87,
-                  size: responsive.isTablet ? 18 : 20,
+                  size: isTablet ? 18 : 20,
                 ),
                 const SizedBox(width: 6),
                 Text(
                   "Cart",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: responsive.isTablet ? 14 : 16,
+                    fontSize: isTablet ? 14 : 16,
                     color: Colors.black87,
                     letterSpacing: 0.5,
                   ),
@@ -2153,7 +2059,7 @@ class _POSScreenState extends State<POSScreen> {
                       style: TextStyle(
                         color: Colors.yellow.shade700,
                         fontWeight: FontWeight.bold,
-                        fontSize: responsive.isTablet ? 12 : 14,
+                        fontSize: isTablet ? 12 : 14,
                       ),
                     ),
                   ),
@@ -2170,7 +2076,7 @@ class _POSScreenState extends State<POSScreen> {
                       children: [
                         Icon(
                           Icons.shopping_cart_outlined,
-                          size: responsive.isTablet ? 40 : 48,
+                          size: isTablet ? 40 : 48,
                           color: Colors.grey.shade400,
                         ),
                         const SizedBox(height: 6),
@@ -2178,7 +2084,7 @@ class _POSScreenState extends State<POSScreen> {
                           "No items in cart",
                           style: TextStyle(
                             color: Colors.grey.shade600,
-                            fontSize: responsive.isTablet ? 12 : 14,
+                            fontSize: isTablet ? 12 : 14,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -2186,7 +2092,7 @@ class _POSScreenState extends State<POSScreen> {
                     ),
                   )
                 : ListView.builder(
-                    padding: EdgeInsets.all(responsive.isTablet ? 6 : 8),
+                    padding: EdgeInsets.all(isTablet ? 6 : 8),
                     itemCount: cart.length,
                     itemBuilder: (context, index) {
                       final item = cart[index];
@@ -2210,8 +2116,8 @@ class _POSScreenState extends State<POSScreen> {
                         ),
                         child: ListTile(
                           contentPadding: EdgeInsets.symmetric(
-                            horizontal: responsive.isTablet ? 10 : 12,
-                            vertical: responsive.isTablet ? 2 : 4,
+                            horizontal: isTablet ? 10 : 12,
+                            vertical: isTablet ? 2 : 4,
                           ),
                           leading: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -2223,10 +2129,10 @@ class _POSScreenState extends State<POSScreen> {
                               border: Border.all(color: Colors.black54, width: 0.5),
                             ),
                             child: Text(
-                              _getDisplayCode(item["code"], responsive.isTablet),
+                              _getDisplayCode(item["code"], isTablet),
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: responsive.isTablet ? 10 : 12,
+                                fontSize: isTablet ? 10 : 12,
                                 color: Colors.black87,
                               ),
                             ),
@@ -2235,14 +2141,14 @@ class _POSScreenState extends State<POSScreen> {
                             item["category"],
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
-                              fontSize: responsive.isTablet ? 12 : 13,
+                              fontSize: isTablet ? 12 : 13,
                               color: Colors.grey.shade800,
                             ),
                           ),
                           subtitle: Text(
                             "₱${price.toStringAsFixed(2)} x $qty = ₱${subtotal.toStringAsFixed(2)}",
                             style: TextStyle(
-                              fontSize: responsive.isTablet ? 10 : 11,
+                              fontSize: isTablet ? 10 : 11,
                               color: Colors.grey.shade600,
                               fontWeight: FontWeight.w500,
                             ),
@@ -2257,10 +2163,10 @@ class _POSScreenState extends State<POSScreen> {
                               icon: Icon(
                                 Icons.remove_circle_outline,
                                 color: Colors.red.shade600,
-                                size: responsive.isTablet ? 18 : 20,
+                                size: isTablet ? 18 : 20,
                               ),
                               onPressed: () => removeFromCart(index),
-                              padding: EdgeInsets.all(responsive.isTablet ? 3 : 6),
+                              padding: EdgeInsets.all(isTablet ? 3 : 6),
                               constraints: const BoxConstraints(),
                             ),
                           ),
@@ -2271,7 +2177,7 @@ class _POSScreenState extends State<POSScreen> {
           ),
           // Cart footer with total and checkout
           Container(
-            padding: EdgeInsets.all(responsive.isTablet ? 10 : 12),
+            padding: EdgeInsets.all(isTablet ? 10 : 12),
             decoration: BoxDecoration(
               color: Colors.white,
               border: Border(
@@ -2292,7 +2198,7 @@ class _POSScreenState extends State<POSScreen> {
                       "Total:",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: responsive.isTablet ? 14 : 16,
+                        fontSize: isTablet ? 14 : 16,
                         color: Colors.grey.shade800,
                       ),
                     ),
@@ -2300,7 +2206,7 @@ class _POSScreenState extends State<POSScreen> {
                       "₱${total.toStringAsFixed(2)}",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: responsive.isTablet ? 16 : 18,
+                        fontSize: isTablet ? 16 : 18,
                         color: Colors.green.shade700,
                       ),
                     ),
@@ -2314,7 +2220,7 @@ class _POSScreenState extends State<POSScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: cart.isEmpty ? Colors.grey.shade300 : Colors.yellow.shade700,
                       foregroundColor: cart.isEmpty ? Colors.grey.shade600 : Colors.black87,
-                      padding: EdgeInsets.symmetric(vertical: responsive.isTablet ? 10 : 12),
+                      padding: EdgeInsets.symmetric(vertical: isTablet ? 10 : 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                         side: BorderSide(
@@ -2330,14 +2236,14 @@ class _POSScreenState extends State<POSScreen> {
                       children: [
                         Icon(
                           Icons.payment,
-                          size: responsive.isTablet ? 16 : 18,
+                          size: isTablet ? 16 : 18,
                         ),
                         const SizedBox(width: 6),
                         Text(
                           "Checkout",
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: responsive.isTablet ? 13 : 14,
+                            fontSize: isTablet ? 13 : 14,
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -2348,10 +2254,8 @@ class _POSScreenState extends State<POSScreen> {
               ],
             ),
           ),
-            ],
-          ),
-        );
-      },
+        ],
+      ),
     );
   }
 
@@ -2362,22 +2266,14 @@ class _POSScreenState extends State<POSScreen> {
     showDialog(
       context: context,
       builder: (context) {
-        final responsive = context.responsive;
         return StatefulBuilder(
           builder: (context, setState) {
             return Dialog(
-              insetPadding: EdgeInsets.symmetric(
-                horizontal: responsive.isMobile ? 16 : 40,
-                vertical: 24,
-              ),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
               child: Container(
-                width: responsive.responsiveValue(
-                  mobile: responsive.width * 0.9,
-                  tablet: 450,
-                  desktop: 500,
-                ),
+                width: 450,
                 constraints: BoxConstraints(
-                  maxHeight: responsive.height * 0.85,
+                  maxHeight: MediaQuery.of(context).size.height * 0.85,
                 ),
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -2423,120 +2319,109 @@ class _POSScreenState extends State<POSScreen> {
                     const SizedBox(height: 12),
                     Divider(thickness: 1, color: Colors.grey.shade300),
                     const SizedBox(height: 12),
-                    // Scrollable Content
-                    Flexible(
-                      child: SingleChildScrollView(
+                    // Customer Information Section
+                    if (nameController.text.trim().isNotEmpty || plateController.text.trim().isNotEmpty) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.yellow.shade50, Colors.yellow.shade100],
+                          ),
+                          border: Border.all(color: Colors.black87, width: 1.5),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            // Customer Information Section
-                            if (nameController.text.trim().isNotEmpty || plateController.text.trim().isNotEmpty) ...[
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [Colors.yellow.shade50, Colors.yellow.shade100],
+                            Row(
+                              children: [
+                                Icon(Icons.person, color: Colors.black87, size: 18),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  "Customer Information",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    color: Colors.black87,
                                   ),
-                                  border: Border.all(color: Colors.black87, width: 1.5),
-                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Icon(Icons.person, color: Colors.black87, size: 18),
-                                        const SizedBox(width: 6),
-                                        const Text(
-                                          "Customer Information",
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 14,
-                                            color: Colors.black87,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 6),
-                                    if (nameController.text.trim().isNotEmpty)
-                                      Text(
-                                        "Name: ${nameController.text.trim()}",
-                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
-                                      ),
-                                    if (plateController.text.trim().isNotEmpty)
-                                      Text(
-                                        "Plate: ${plateController.text.trim().toUpperCase()}",
-                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                            ],
-                            // Services Section
-                            Text(
-                              "Services:",
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: Colors.grey.shade700,
-                              ),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                            ...cart.map((item) {
-                              final price = (item["price"] as num).toDouble();
-                              final qty = (item["quantity"] ?? 0) as int;
-                              final subtotal = price * qty;
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 6),
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade50,
-                                  border: Border.all(color: Colors.grey.shade200),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            "${item["code"]} - ${item["category"]}",
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            "₱${price.toStringAsFixed(2)} x $qty",
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey.shade600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Text(
-                                      "₱${subtotal.toStringAsFixed(2)}",
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }),
+                            const SizedBox(height: 6),
+                            if (nameController.text.trim().isNotEmpty)
+                              Text(
+                                "Name: ${nameController.text.trim()}",
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
+                              ),
+                            if (plateController.text.trim().isNotEmpty)
+                              Text(
+                                "Plate: ${plateController.text.trim().toUpperCase()}",
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
+                              ),
                           ],
                         ),
                       ),
+                      const SizedBox(height: 12),
+                    ],
+                    // Services Section
+                    Text(
+                      "Services:",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: Colors.grey.shade700,
+                      ),
                     ),
+                    const SizedBox(height: 8),
+                    ...cart.map((item) {
+                      final price = (item["price"] as num).toDouble();
+                      final qty = (item["quantity"] ?? 0) as int;
+                      final subtotal = price * qty;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          border: Border.all(color: Colors.grey.shade200),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "${item["code"]} - ${item["category"]}",
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    "₱${price.toStringAsFixed(2)} x $qty",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              "₱${subtotal.toStringAsFixed(2)}",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
                     const SizedBox(height: 12),
                     Divider(thickness: 2, color: Colors.black87),
                     const SizedBox(height: 8),
@@ -2563,10 +2448,10 @@ class _POSScreenState extends State<POSScreen> {
                           ),
                           Text(
                             "₱${total.toStringAsFixed(2)}",
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 18,
-                              color: Colors.black87,
+                              color: Colors.yellow.shade800,
                             ),
                           ),
                         ],
@@ -2737,13 +2622,12 @@ class _POSScreenState extends State<POSScreen> {
   }) async {
     try {
       final now = DateTime.now();
-      final serviceTime = _selectedTime ?? TimeOfDay.now();
       final txnDateTime = DateTime(
         now.year,
         now.month,
         now.day,
-        serviceTime.hour,
-        serviceTime.minute,
+        _selectedTime.hour,
+        _selectedTime.minute,
       );
 
       // 👤 Customer (unified shape) - prioritize text controllers as they are the source of truth
@@ -2817,9 +2701,9 @@ class _POSScreenState extends State<POSScreen> {
         "date": Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
         "transactionDate": Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
         "time": {
-          "hour": serviceTime.hour,
-          "minute": serviceTime.minute,
-          "formatted": _formatTimeOfDay(context, serviceTime),
+          "hour": _selectedTime.hour,
+          "minute": _selectedTime.minute,
+          "formatted": _formatTimeOfDay(context, _selectedTime),
         },
         "transactionAt": Timestamp.fromDate(txnDateTime),
         "paymentMethod": "cash",
@@ -2827,7 +2711,7 @@ class _POSScreenState extends State<POSScreen> {
         "status": "completed",
         "source": "pos",
         "assignedTeam": assignedTeam ?? "Unassigned",
-        "teamCommission": (assignedTeam != null && assignedTeam != "Unassigned") ? totalAmount * 0.35 : 0.0,
+        "teamCommission": 0.0, // Commission added only when booking is marked completed
         "createdAt": FieldValue.serverTimestamp(),
       };
 
@@ -2846,6 +2730,7 @@ class _POSScreenState extends State<POSScreen> {
         assignedTeam: assignedTeam,
       );
 
+      // Clear cart and reset customer after successful transaction
       if (mounted) {
         setState(() {
           cart.clear();
@@ -2853,7 +2738,6 @@ class _POSScreenState extends State<POSScreen> {
           _currentCustomerId = null;
           _vehicleTypeForCustomer = null;
           _selectedVehicleType = null;
-          _selectedTime = null;
           nameController.clear();
           plateController.clear();
           phoneController.clear();
@@ -2899,13 +2783,14 @@ class _POSScreenState extends State<POSScreen> {
         "source": "pos",
         "transactionId": transactionId,
         "assignedTeam": assignedTeam ?? "Unassigned",
-        "teamCommission": 0.0, // Commission calculated when marked as completed
+        "teamCommission": 0.0, // Commission added only when booking is marked completed
 
         "createdAt": FieldValue.serverTimestamp(),
       };
 
       await FirebaseFirestore.instance.collection("Bookings").add(bookingData);
     } catch (e) {
+      debugPrint('Failed to create booking from POS transaction: $e');
     }
   }
 
@@ -2989,13 +2874,12 @@ class _POSScreenState extends State<POSScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            final responsive = context.responsive;
             return Dialog(
-              insetPadding: EdgeInsets.all(responsive.isMobile ? 16 : 20),
+              insetPadding: const EdgeInsets.all(20),
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxWidth: responsive.responsiveValue(mobile: responsive.width * 0.9, tablet: 500, desktop: 550),
-                  maxHeight: responsive.height * 0.7,
+                  maxWidth: 500,
+                  maxHeight: MediaQuery.of(context).size.height * 0.7,
                 ),
                 child: Container(
                   padding: const EdgeInsets.all(20),
@@ -3246,16 +3130,11 @@ class _POSScreenState extends State<POSScreen> {
     showDialog(
       context: context,
       builder: (context) {
-        final responsive = context.responsive;
         return Dialog(
-          insetPadding: EdgeInsets.all(responsive.isMobile ? 16 : 40),
+          insetPadding: const EdgeInsets.all(40),
           child: Container(
-            width: responsive.responsiveValue(
-              mobile: responsive.width * 0.95,
-              tablet: responsive.width * 0.8,
-              desktop: responsive.width * 0.75,
-            ),
-            height: responsive.height * 0.7,
+            width: MediaQuery.of(context).size.width * 0.75,
+            height: MediaQuery.of(context).size.height * 0.7,
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               color: Colors.white,
@@ -3331,7 +3210,7 @@ class _POSScreenState extends State<POSScreen> {
                                 style: const TextStyle(fontSize: 16),
                               ),
                               Text(
-                                "Time: ${_formatTimeOfDay(context, _selectedTime ?? TimeOfDay.now())}",
+                                "Time: ${_formatTimeOfDay(context, _selectedTime)}",
                                 style: const TextStyle(fontSize: 16),
                               ),
                               if (assignedTeam != null)
@@ -3536,6 +3415,7 @@ class _POSScreenState extends State<POSScreen> {
                               regularFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Regular.ttf"));
                               boldFont = pw.Font.ttf(await rootBundle.load("assets/fonts/Roboto-Bold.ttf"));
                             } catch (e) {
+                              debugPrint('Using default fonts: $e');
                             }
 
                             // Thermal receipt style - 80mm width (226.77 points)
@@ -3870,6 +3750,7 @@ class _POSScreenState extends State<POSScreen> {
                               if (context.mounted) Navigator.pop(context);
                             }
                           } catch (e) {
+                            debugPrint('Error generating receipt: $e');
                             if (mounted && context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(

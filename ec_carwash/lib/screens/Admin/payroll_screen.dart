@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:ec_carwash/data_models/expense_data.dart';
+import 'package:ec_carwash/utils/reset_commissions.dart';
+import 'package:ec_carwash/utils/delete_all_data.dart';
 
 class PayrollScreen extends StatefulWidget {
   const PayrollScreen({super.key});
@@ -69,39 +71,31 @@ class _PayrollScreenState extends State<PayrollScreen> {
               setDialogState(() => isCalculating = true);
 
               try {
-                debugPrint('📊 Calculating period amount for $teamName');
-                debugPrint('   Period: ${disbursementStartDate.toString()} to ${disbursementEndDate.toString()}');
-
                 final bookingsSnapshot = await FirebaseFirestore.instance
                     .collection('Bookings')
                     .where('status', isEqualTo: 'completed')
                     .where('assignedTeam', isEqualTo: teamName)
                     .get();
 
-                debugPrint('   Total completed bookings for team: ${bookingsSnapshot.docs.length}');
-
                 final bookingsInPeriod = bookingsSnapshot.docs.where((doc) {
                   final data = doc.data();
-                  // Use completedAt if available, fall back to updatedAt
+                  final source = data['source'] as String? ?? '';
+
+                  if (source == 'import') return false;
+
                   final completedAt = (data['completedAt'] as Timestamp?)?.toDate() ??
-                                     (data['updatedAt'] as Timestamp?)?.toDate();
+                                     (data['updatedAt'] as Timestamp?)?.toDate() ??
+                                     (data['createdAt'] as Timestamp?)?.toDate();
                   final alreadyPaid = data['salaryDisbursed'] as bool? ?? false;
 
-                  if (completedAt == null || alreadyPaid) {
-                    if (completedAt == null) {
-                      debugPrint('   ✗ Booking ${doc.id}: No completedAt/updatedAt date');
-                    }
-                    return false;
-                  }
+                  if (completedAt == null || alreadyPaid) return false;
 
-                  final isInPeriod = completedAt.isAfter(disbursementStartDate.subtract(const Duration(seconds: 1))) &&
-                         completedAt.isBefore(disbursementEndDate.add(const Duration(seconds: 1)));
+                  final completedDate = DateTime(completedAt.year, completedAt.month, completedAt.day);
+                  final periodStart = DateTime(disbursementStartDate.year, disbursementStartDate.month, disbursementStartDate.day);
+                  final periodEnd = DateTime(disbursementEndDate.year, disbursementEndDate.month, disbursementEndDate.day, 23, 59, 59);
 
-                  if (isInPeriod) {
-                    debugPrint('   ✓ Booking ${doc.id}: completedAt=${completedAt.toString()}, commission=${data['teamCommission']}');
-                  }
-
-                  return isInPeriod;
+                  return (completedDate.isAtSameMomentAs(periodStart) || completedDate.isAfter(periodStart)) &&
+                         (completedDate.isAtSameMomentAs(periodEnd) || completedDate.isBefore(periodEnd));
                 }).toList();
 
                 double amount = 0.0;
@@ -110,15 +104,12 @@ class _PayrollScreenState extends State<PayrollScreen> {
                   amount += commissionValue;
                 }
 
-                debugPrint('   Result: ₱${amount.toStringAsFixed(2)} from ${bookingsInPeriod.length} jobs');
-
                 setDialogState(() {
                   periodAmount = amount;
                   periodJobCount = bookingsInPeriod.length;
                   isCalculating = false;
                 });
               } catch (e) {
-                debugPrint('   ❌ Error calculating period amount: $e');
                 setDialogState(() {
                   periodAmount = 0.0;
                   periodJobCount = 0;
@@ -488,15 +479,26 @@ class _PayrollScreenState extends State<PayrollScreen> {
       // Filter bookings within the period and not yet disbursed
       final bookingsInPeriod = bookingsSnapshot.docs.where((doc) {
         final data = doc.data();
-        // Use completedAt if available, fall back to updatedAt
+        final source = data['source'] as String? ?? '';
+
+        // Skip CSV imported bookings
+        if (source == 'import') return false;
+
+        // Use completedAt if available, fall back to updatedAt, then createdAt
         final completedAt = (data['completedAt'] as Timestamp?)?.toDate() ??
-                           (data['updatedAt'] as Timestamp?)?.toDate();
+                           (data['updatedAt'] as Timestamp?)?.toDate() ??
+                           (data['createdAt'] as Timestamp?)?.toDate();
         final alreadyPaid = data['salaryDisbursed'] as bool? ?? false;
 
         if (completedAt == null || alreadyPaid) return false;
 
-        return completedAt.isAfter(selectedDisbursementStartDate.subtract(const Duration(seconds: 1))) &&
-               completedAt.isBefore(selectedDisbursementEndDate.add(const Duration(seconds: 1)));
+        // Normalize dates to start/end of day for proper comparison
+        final completedDate = DateTime(completedAt.year, completedAt.month, completedAt.day);
+        final periodStart = DateTime(selectedDisbursementStartDate.year, selectedDisbursementStartDate.month, selectedDisbursementStartDate.day);
+        final periodEnd = DateTime(selectedDisbursementEndDate.year, selectedDisbursementEndDate.month, selectedDisbursementEndDate.day, 23, 59, 59);
+
+        return (completedDate.isAtSameMomentAs(periodStart) || completedDate.isAfter(periodStart)) &&
+               (completedDate.isAtSameMomentAs(periodEnd) || completedDate.isBefore(periodEnd));
       }).toList();
 
       if (bookingsInPeriod.isEmpty) {
@@ -531,7 +533,7 @@ class _PayrollScreenState extends State<PayrollScreen> {
         'disbursementDate': Timestamp.fromDate(selectedDisbursementDate),
         'isDisbursed': true,
         'disbursedAt': FieldValue.serverTimestamp(),
-        'disbursedBy': 'Admin', // TODO: Get from auth
+        'disbursedBy': 'Admin',
       });
 
       // Mark all bookings in this period as paid
@@ -579,6 +581,120 @@ class _PayrollScreenState extends State<PayrollScreen> {
     }
   }
 
+  Future<void> _resetAllCommissions() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset All Commissions'),
+        content: const Text(
+          'This will reset all team commissions to ₱0.00 in the Bookings collection. This action cannot be undone.\n\nAre you sure you want to continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Reset All'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      setState(() => _isLoading = true);
+
+      final resetCount = await CommissionResetter.resetAllCommissions();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Successfully reset $resetCount commission records'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        // Reload data
+        await _loadPayrollData();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error resetting commissions: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteAllData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('⚠️ Delete All Data'),
+        content: const Text(
+          'This will PERMANENTLY DELETE all:\n\n• Transactions\n• Bookings\n\nThis action CANNOT be undone!\n\nAre you absolutely sure?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade900,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('DELETE ALL'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      setState(() => _isLoading = true);
+
+      final results = await DataDeleter.deleteAllTransactionsAndBookings();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '✅ Deleted ${results['transactions']} transactions and ${results['bookings']} bookings',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+
+        await _loadPayrollData();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error deleting data: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _loadPayrollData() async {
     setState(() => _isLoading = true);
 
@@ -617,44 +733,21 @@ class _PayrollScreenState extends State<PayrollScreen> {
           .where('status', isEqualTo: 'completed')
           .get();
 
-      // Calculate commissions for unpaid bookings only
       Map<String, double> commissions = {'Team A': 0.0, 'Team B': 0.0};
       Map<String, int> counts = {'Team A': 0, 'Team B': 0};
-      int totalCompleted = bookingsSnapshot.docs.length;
-      int paidCount = 0;
-      int unpaidCount = 0;
-
-      debugPrint('📊 Loading payroll data...');
-      debugPrint('   Total completed bookings: $totalCompleted');
-
       for (final doc in bookingsSnapshot.docs) {
         final data = doc.data();
         final team = data['assignedTeam'] as String?;
         final commission = (data['teamCommission'] as num?)?.toDouble() ?? 0.0;
         final isPaid = data['salaryDisbursed'] as bool? ?? false;
+        final source = data['source'] as String? ?? '';
 
-        if (isPaid) {
-          paidCount++;
-        } else {
-          unpaidCount++;
-        }
-
-        // Skip if no team assigned or already paid
-        if (team == null || !commissions.containsKey(team) || isPaid) {
-          continue;
-        }
+        if (source == 'import') continue;
+        if (team == null || !commissions.containsKey(team) || isPaid) continue;
 
         commissions[team] = commissions[team]! + commission;
         counts[team] = counts[team]! + 1;
       }
-
-      debugPrint('   Paid bookings: $paidCount');
-      debugPrint('   Unpaid bookings: $unpaidCount');
-      debugPrint('   Team A pending: ₱${commissions['Team A']!.toStringAsFixed(2)} (${counts['Team A']} jobs)');
-      debugPrint('   Team B pending: ₱${commissions['Team B']!.toStringAsFixed(2)} (${counts['Team B']} jobs)');
-
-
-      // Update disbursement status: show as disbursed only if there are no pending commissions
       Map<String, bool> finalDisbursementStatus = {
         'Team A': commissions['Team A'] == 0.0 && teamHasDisbursement['Team A']!,
         'Team B': commissions['Team B'] == 0.0 && teamHasDisbursement['Team B']!,
@@ -759,6 +852,28 @@ class _PayrollScreenState extends State<PayrollScreen> {
             ),
           ),
           const Spacer(),
+          OutlinedButton.icon(
+            onPressed: _deleteAllData,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.red.shade900,
+              backgroundColor: Colors.red.shade100,
+              side: BorderSide(color: Colors.red.shade900, width: 1.5),
+            ),
+            icon: const Icon(Icons.delete_forever, size: 18),
+            label: const Text('Delete All'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _resetAllCommissions,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.red.shade700,
+              backgroundColor: Colors.red.shade50,
+              side: BorderSide(color: Colors.red.shade700, width: 1.5),
+            ),
+            icon: const Icon(Icons.restore, size: 18),
+            label: const Text('Reset All'),
+          ),
+          const SizedBox(width: 8),
           OutlinedButton.icon(
             onPressed: _loadPayrollData,
             style: OutlinedButton.styleFrom(
