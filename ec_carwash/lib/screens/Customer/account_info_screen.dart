@@ -503,102 +503,65 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
 
   Future<void> _showEditPlateDialog(Customer vehicle) async {
     final plateController = TextEditingController(text: vehicle.plateNumber);
-    String? errorText;
-    bool checking = false;
 
     await showDialog(
       context: context,
       builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            Future<void> validate(String value) async {
-              final plate = value.trim().toUpperCase();
-              if (plate.isEmpty) {
-                setDialogState(() => errorText = 'Plate number is required');
-                return;
-              }
-              // If unchanged, it's valid
-              if (plate == vehicle.plateNumber.toUpperCase()) {
-                setDialogState(() => errorText = null);
-                return;
-              }
-              setDialogState(() {
-                checking = true;
-                errorText = null;
-              });
-              final unique = await _isPlateNumberUnique(plate);
-              setDialogState(() {
-                checking = false;
-                errorText = unique ? null : 'This plate number is already registered';
-              });
-            }
-
-            return AlertDialog(
-              title: const Text('Edit Plate Number'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: plateController,
-                    decoration: InputDecoration(
-                      labelText: 'Plate Number',
-                      border: const OutlineInputBorder(),
-                      errorText: errorText,
-                    ),
-                    textCapitalization: TextCapitalization.characters,
-                    onChanged: (v) {
-                      // debounce-lite: validate on change but avoid spamming
-                      // simple approach: validate after short delay
-                    },
-                  ),
-                  if (checking)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8.0),
-                      child: LinearProgressIndicator(minHeight: 2),
-                    ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    final plate = plateController.text.trim().toUpperCase();
-                    if (plate.isEmpty) {
+        return AlertDialog(
+          title: const Text('Edit Plate Number'),
+          content: TextField(
+            controller: plateController,
+            decoration: const InputDecoration(
+              labelText: 'Plate Number',
+              border: OutlineInputBorder(),
+            ),
+            textCapitalization: TextCapitalization.characters,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final plate = plateController.text.trim().toUpperCase();
+                if (plate.isEmpty) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Plate number cannot be empty'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  }
+                  return;
+                }
+                if (plate != vehicle.plateNumber.toUpperCase()) {
+                  final unique = await _isPlateNumberUnique(plate);
+                  if (!unique) {
+                    if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Plate number cannot be empty'),
-                          backgroundColor: Colors.orange,
+                          content: Text('This plate number is already registered'),
+                          backgroundColor: Colors.red,
                         ),
                       );
-                      return;
                     }
-                    if (plate != vehicle.plateNumber.toUpperCase()) {
-                      final unique = await _isPlateNumberUnique(plate);
-                      if (!unique) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('This plate number is already registered'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-                    }
-                    Navigator.pop(context);
-                    await _updatePlateNumber(vehicle, plate);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.yellow[700],
-                    foregroundColor: Colors.black,
-                  ),
-                  child: const Text('Save'),
-                ),
-              ],
-            );
-          },
+                    return;
+                  }
+                }
+                if (context.mounted) {
+                  Navigator.pop(context);
+                }
+                await _updatePlateNumber(vehicle, plate);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.yellow[700],
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('Save'),
+            ),
+          ],
         );
       },
     );
